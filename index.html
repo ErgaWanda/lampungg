@@ -203,6 +203,25 @@ def api_login():
         }
     })
 
+@app.route('/api/auth/register', methods=['POST'])
+def api_register():
+    data = request.get_json(silent=True) or {}
+    username = (data.get('username') or '').strip()
+    password = data.get('password') or ''
+
+    if not username or not password:
+        return jsonify({'message': 'Username dan password wajib diisi'}), 400
+    if len(username) < 3:
+        return jsonify({'message': 'Username minimal 3 karakter'}), 400
+    if len(password) < 4:
+        return jsonify({'message': 'Password minimal 4 karakter'}), 400
+
+    created, msg = user_manager.create_user(username, password)
+    if not created:
+        return jsonify({'message': msg or 'Registrasi gagal'}), 400
+
+    return jsonify({'success': True, 'message': msg}), 201
+
 @app.route('/api/auth/logout', methods=['POST'])
 @login_required
 def api_logout():
@@ -360,7 +379,7 @@ def api_user_results_list():
         mapped = []
         counts = {'Positif': 0, 'Negatif': 0, 'Netral': 0, 'Tidak Valid': 0}
 
-        for item in records:
+        for idx, item in enumerate(records, start=1):
             label = item.get('Sentimen Prediksi') or item.get('sentimen') or item.get('label')
             label = str(label) if label is not None else ''
             label_norm = label.title() if label else ''
@@ -369,6 +388,7 @@ def api_user_results_list():
                 counts[label_norm] += 1
 
             mapped.append({
+                'no': idx,
                 'text': item.get('text') or item.get('komentar') or item.get('teks') or item.get('Text') or item.get('Komentar') or item.get('Teks') or item.get('text_clean') or '',
                 'label': label_norm,
                 'confidence': item.get('Probabilitas'),
@@ -517,6 +537,7 @@ def api_admin_analyses_list():
 def api_admin_analyses_detail(analysis_id):
     page = request.args.get('page', 1, type=int)
     per_page = request.args.get('per_page', 50, type=int)
+    sentiment = request.args.get('sentiment')
     offset = max(0, (page - 1) * per_page)
 
     connection = get_db_connection()
@@ -539,16 +560,34 @@ def api_admin_analyses_detail(analysis_id):
         except Exception:
             details_all = []
 
-        total_details = len(details_all)
-        paginated = details_all[offset: offset + per_page]
+        if sentiment and str(sentiment).lower() != 'all':
+            wanted = str(sentiment).title()
+            filtered = []
+            for item in details_all:
+                label = item.get('Sentimen Prediksi') or item.get('sentimen') or item.get('label')
+                label = str(label) if label is not None else ''
+                label_norm = label.title() if label else ''
+                if label_norm == wanted:
+                    filtered.append(item)
+            details_filtered = filtered
+        else:
+            details_filtered = details_all
+
+        total_details = len(details_filtered)
+        paginated = details_filtered[offset: offset + per_page]
 
         mapped_details = []
         for idx, item in enumerate(paginated, start=offset + 1):
+            label = item.get('Sentimen Prediksi') or item.get('sentimen') or item.get('label')
+            label = str(label) if label is not None else ''
+            label_norm = label.title() if label else ''
             mapped_details.append({
                 'comment_id': None,
+                'no': idx,
                 'text': item.get('text') or item.get('komentar') or item.get('teks') or item.get('Text') or item.get('Komentar') or item.get('Teks') or item.get('text_clean') or '',
+                'text_clean': item.get('text_clean'),
                 'polarity': None,
-                'label': item.get('Sentimen Prediksi') or item.get('sentimen') or item.get('label'),
+                'label': label_norm,
                 'confidence': item.get('Probabilitas')
             })
 
