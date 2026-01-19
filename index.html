@@ -1,164 +1,277 @@
 <template>
-  <div class="guide-wrapper">
+  <div class="dashboard-wrapper">
     <div class="bg-decor-1"></div>
     <div class="bg-decor-2"></div>
 
     <el-container class="main-layout">
       <el-header class="glass-header">
         <div class="header-inner">
-          <div class="brand-wrapper" @click="$router.push('/user/dashboard')">
+          <div class="brand-wrapper">
             <div class="brand-icon-box">
               <el-icon><TrendCharts /></el-icon>
             </div>
             <div class="brand-info">
               <span class="brand-name">Sentimen<span class="text-primary">Pro</span></span>
-              <span class="brand-tag">Panduan Pengguna</span>
+              <span class="brand-tag">User Dashboard</span>
             </div>
           </div>
 
           <div class="header-nav">
-            <el-button @click="$router.push('/user/dashboard')" text>
-              <el-icon class="mr-2"><Back /></el-icon> Kembali ke Dashboard
+            <el-button class="nav-link" text @click="$router.push('/user/results')">
+              <el-icon class="mr-2"><Document /></el-icon> Hasil Analisis
             </el-button>
+            <div class="divider"></div>
+            <el-dropdown trigger="click">
+              <div class="user-profile">
+                <el-avatar :size="32" icon="UserFilled" class="user-avatar" />
+                <span class="username">Akun Saya</span>
+                <el-icon><ArrowDown /></el-icon>
+              </div>
+              <template #dropdown>
+                <el-dropdown-menu>
+                  <el-dropdown-item @click="handleLogout" class="danger-text">
+                    <el-icon><SwitchButton /></el-icon> Logout
+                  </el-dropdown-item>
+                </el-dropdown-menu>
+              </template>
+            </el-dropdown>
           </div>
         </div>
       </el-header>
 
       <el-main class="main-content">
-        <div class="content-container">
-          <div class="page-header">
-            <h1 class="display-title">Panduan Aplikasi</h1>
+        <section class="hero-container">
+          <div class="hero-content">
+            <div class="status-pill">
+              <span class="dot"></span>
+              <span>System Operational</span>
+            </div>
+            
+            <h1 class="display-title">
+              Analisis Sentimen <br>
+              <span class="gradient-text">Cepat & Akurat.</span>
+            </h1>
+            
             <p class="lead-text">
-              Pelajari cara menggunakan aplikasi analisis sentimen ini mulai dari awal hingga mendapatkan wawasan mendalam.
+              Unggah data ulasan pelanggan Anda dan biarkan AI kami mengolahnya menjadi wawasan strategis dalam hitungan detik.
             </p>
+
+            <div class="cta-group">
+              <el-button 
+                type="primary" 
+                size="large" 
+                class="primary-cta"
+                @click="$router.push('/user/results')"
+              >
+                Lihat Data Terbaru
+                <el-icon class="ml-2"><ArrowRight /></el-icon>
+              </el-button>
+            </div>
+
+            <div class="mini-stats">
+              <div class="stat-item">
+                <span class="stat-val">99%</span>
+                <span class="stat-lbl">Akurasi</span>
+              </div>
+              <div class="stat-sep"></div>
+              <div class="stat-item">
+                <span class="stat-val">24/7</span>
+                <span class="stat-lbl">Real-time</span>
+              </div>
+              <div class="stat-sep"></div>
+              <div class="stat-item">
+                <span class="stat-val">Secure</span>
+                <span class="stat-lbl">Encrypted</span>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <!-- Tahapan Aplikasi Section -->
+        <section class="steps-section">
+          <div class="section-header">
+            <div>
+              <h2>Tahapan Aplikasi</h2>
+              <p>Proses analisis sentimen dalam 3 langkah mudah</p>
+            </div>
+            <el-button type="primary" plain round size="small" @click="$router.push('/user/guide')">
+              Lihat Panduan Lengkap <el-icon class="ml-1"><ArrowRight /></el-icon>
+            </el-button>
           </div>
 
-          <div class="timeline-container">
-            <el-timeline>
-              <!-- Step 1 -->
-              <el-timeline-item timestamp="Langkah 1" placement="top" size="large" type="primary" color="#4f46e5">
-                <el-card class="step-card">
-                  <template #header>
-                    <div class="card-header">
-                      <h3><el-icon class="step-icon"><User /></el-icon> Registrasi & Login</h3>
-                    </div>
-                  </template>
-                  <p>Sebelum memulai, pastikan Anda memiliki akun.</p>
-                  <ul>
-                    <li>Buka halaman <b>Register</b> jika belum punya akun.</li>
-                    <li>Isi username dan password yang aman.</li>
-                    <li>Login menggunakan akun yang telah dibuat.</li>
-                  </ul>
-                </el-card>
-              </el-timeline-item>
+          <div class="steps-grid">
+            <div class="step-card">
+              <div class="step-icon bg-indigo">
+                <el-icon><Upload /></el-icon>
+              </div>
+              <h3>1. Unggah Data</h3>
+              <p>Upload file Excel/CSV berisi komentar ulasan.</p>
+            </div>
 
-              <!-- Step 2 -->
-              <el-timeline-item timestamp="Langkah 2" placement="top" size="large" type="success" color="#10b981">
-                <el-card class="step-card">
-                  <template #header>
-                    <div class="card-header">
-                      <h3><el-icon class="step-icon"><Upload /></el-icon> Unggah Data (Admin)</h3>
-                    </div>
-                  </template>
-                  <p>Proses analisis dimulai dengan data. (Fitur ini khusus Admin)</p>
-                  <ul>
-                    <li>Masuk ke menu <b>Upload</b>.</li>
-                    <li>Siapkan file <b>Excel (.xlsx)</b> atau <b>CSV</b>.</li>
-                    <li>Pastikan file memiliki kolom berisi teks komentar/ulasan.</li>
-                    <li>Klik tombol Upload dan tunggu proses validasi.</li>
-                  </ul>
-                  <el-alert title="Format Data" type="info" :closable="false" show-icon>
-                    File harus bersih dan memiliki header kolom yang jelas (misal: "text" atau "comment").
-                  </el-alert>
-                </el-card>
-              </el-timeline-item>
+            <div class="step-arrow">
+              <el-icon><ArrowRight /></el-icon>
+            </div>
 
-              <!-- Step 3 -->
-              <el-timeline-item timestamp="Langkah 3" placement="top" size="large" type="warning" color="#f59e0b">
-                <el-card class="step-card">
-                  <template #header>
-                    <div class="card-header">
-                      <h3><el-icon class="step-icon"><MagicStick /></el-icon> Proses Analisis Otomatis</h3>
-                    </div>
-                  </template>
-                  <p>Sistem akan memproses data secara otomatis di belakang layar.</p>
-                  <div class="process-steps">
-                    <div class="p-step">
-                      <span>1. Cleansing</span>
-                      <small>Membersihkan teks dari simbol, emoji, dan noise.</small>
-                    </div>
-                    <div class="p-arrow">→</div>
-                    <div class="p-step">
-                      <span>2. Labeling (AI)</span>
-                      <small>Model BERT memprediksi sentimen (Positif/Negatif/Netral).</small>
-                    </div>
-                    <div class="p-arrow">→</div>
-                    <div class="p-step">
-                      <span>3. Visualisasi</span>
-                      <small>Data dikonversi menjadi grafik dan statistik.</small>
-                    </div>
-                  </div>
-                </el-card>
-              </el-timeline-item>
+            <div class="step-card">
+              <div class="step-icon bg-pink">
+                <el-icon><MagicStick /></el-icon>
+              </div>
+              <h3>2. Proses Analisis</h3>
+              <p>AI memproses sentimen dan mengekstrak insight.</p>
+            </div>
 
-              <!-- Step 4 -->
-              <el-timeline-item timestamp="Langkah 4" placement="top" size="large" type="danger" color="#ec4899">
-                <el-card class="step-card">
-                  <template #header>
-                    <div class="card-header">
-                      <h3><el-icon class="step-icon"><DataAnalysis /></el-icon> Eksplorasi Hasil</h3>
-                    </div>
-                  </template>
-                  <p>Akses menu <b>Hasil Analisis</b> di dashboard Anda.</p>
-                  <ul>
-                    <li><b>Grafik Pie:</b> Melihat proporsi sentimen secara keseluruhan.</li>
-                    <li><b>WordCloud:</b> Mengetahui kata-kata yang paling sering muncul.</li>
-                    <li><b>Tabel Data:</b> Melihat detail setiap komentar beserta skor keyakinan AI.</li>
-                  </ul>
-                </el-card>
-              </el-timeline-item>
+            <div class="step-arrow">
+              <el-icon><ArrowRight /></el-icon>
+            </div>
+
+            <div class="step-card" @click="$router.push('/user/results')" style="cursor: pointer;">
+              <div class="step-icon bg-teal">
+                <el-icon><DataAnalysis /></el-icon>
+              </div>
+              <h3>3. Lihat Hasil</h3>
+              <p>Akses visualisasi dan laporan lengkap.</p>
+            </div>
+          </div>
+        </section>
+
+        <section class="features-section">
+          <div class="section-header">
+            <h2>Akses Cepat</h2>
+            <p>Alat visualisasi dan laporan data Anda</p>
+          </div>
+
+          <div class="features-grid">
+            <div class="feature-card" @click="$router.push('/user/results')">
+              <div class="f-icon bg-blue">
+                <el-icon><PieChart /></el-icon>
+              </div>
+              <div class="f-content">
+                <h3>Visualisasi Grafik</h3>
+                <p>Lihat distribusi sentimen dalam bentuk grafik interaktif.</p>
+                <span class="f-link">Buka Grafik <el-icon><ArrowRight /></el-icon></span>
+              </div>
+            </div>
+
+            <div class="feature-card" @click="$router.push('/user/results')">
+              <div class="f-icon bg-purple">
+                <el-icon><DataLine /></el-icon>
+              </div>
+              <div class="f-content">
+                <h3>Tabel Data</h3>
+                <p>Telusuri setiap baris komentar beserta skor kepercayaannya.</p>
+                <span class="f-link">Lihat Tabel <el-icon><ArrowRight /></el-icon></span>
+              </div>
+            </div>
+
+            <div class="feature-card" @click="$router.push('/user/results')">
+              <div class="f-icon bg-green">
+                <el-icon><TrendCharts /></el-icon>
+              </div>
+              <div class="f-content">
+                <h3>Filter Lanjutan</h3>
+                <p>Saring data berdasarkan tanggal atau ID pengguna tertentu.</p>
+                <span class="f-link">Gunakan Filter <el-icon><ArrowRight /></el-icon></span>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <section class="wordcloud-section">
+          <el-card class="wordcloud-card" shadow="hover">
+            <template #header>
+              <div class="card-header">
+                <div class="header-title">
+                  <el-icon><ChatDotSquare /></el-icon>
+                  <h3>WordCloud Insight</h3>
+                </div>
+                <el-tag effect="plain" round>Top Keywords</el-tag>
+              </div>
+            </template>
+            
+            <div class="wordcloud-wrapper">
+              <div v-if="loadingCloud" class="loading-state">
+                <el-icon class="is-loading"><Loading /></el-icon>
+                <span>Memuat visualisasi...</span>
+              </div>
               
-              <!-- Step 5 -->
-              <el-timeline-item timestamp="Langkah 5" placement="top" size="large" type="info" color="#3b82f6">
-                 <el-card class="step-card">
-                  <template #header>
-                    <div class="card-header">
-                      <h3><el-icon class="step-icon"><Filter /></el-icon> Filter & Laporan</h3>
-                    </div>
-                  </template>
-                  <p>Gunakan fitur filter untuk analisis lebih spesifik.</p>
-                   <ul>
-                    <li>Filter berdasarkan rentang tanggal.</li>
-                    <li>Filter berdasarkan kategori sentimen (misal: hanya melihat yang Negatif).</li>
-                  </ul>
-                </el-card>
-              </el-timeline-item>
+              <img 
+                v-else-if="wordcloudImage" 
+                :src="wordcloudImage" 
+                alt="WordCloud" 
+                class="wc-image"
+              />
+              
+              <div v-else class="empty-state">
+                <div class="empty-icon">
+                  <el-icon><Document /></el-icon>
+                </div>
+                <h4>Belum Ada Data</h4>
+                <p>Lakukan analisis data terlebih dahulu untuk melihat WordCloud.</p>
+              </div>
+            </div>
+          </el-card>
+        </section>
 
-            </el-timeline>
-          </div>
-          
-          <div class="cta-bottom">
-             <el-button type="primary" size="large" round @click="$router.push('/user/results')">
-                Lihat Hasil Analisis Sekarang
-             </el-button>
-          </div>
-
-        </div>
       </el-main>
+
+      <footer class="main-footer">
+        <p>© 2026 SentimenPro Analytics. All rights reserved.</p>
+      </footer>
     </el-container>
   </div>
 </template>
 
 <script setup>
+import { ref, onMounted } from 'vue'
+import { useRouter } from 'vue-router'
+import { ElMessage } from 'element-plus'
 import { 
-  TrendCharts, Back, User, Upload, MagicStick, DataAnalysis, Filter
+  TrendCharts, Document, SwitchButton, UserFilled, ArrowDown, 
+  ArrowRight, PieChart, DataLine, ChatDotSquare, Loading,
+  Upload, MagicStick, DataAnalysis
 } from '@element-plus/icons-vue'
+import { useAuthStore } from '@/stores/auth'
+import api from '@/services/api'
+
+const router = useRouter()
+const authStore = useAuthStore()
+const wordcloudImage = ref(null)
+const loadingCloud = ref(false)
+
+const fetchWordcloud = async () => {
+  loadingCloud.value = true
+  try {
+    if (!authStore.isAuthenticated) return
+    
+    // Mengambil wordcloud untuk semua sentimen
+    const res = await api.get('/user/results/wordcloud', { 
+      params: { sentiment: 'all' } 
+    })
+    wordcloudImage.value = res.data?.image || null
+  } catch (e) {
+    console.error('Wordcloud fetch error:', e)
+    wordcloudImage.value = null
+  } finally {
+    loadingCloud.value = false
+  }
+}
+
+const handleLogout = async () => {
+  await authStore.logout()
+  ElMessage.success('Logout berhasil')
+  router.replace('/login')
+}
+
+onMounted(() => {
+  fetchWordcloud()
+})
 </script>
 
 <style scoped>
 @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap');
 
-.guide-wrapper {
+/* --- Global Layout --- */
+.dashboard-wrapper {
   min-height: 100vh;
   background-color: #f8fafc;
   font-family: 'Inter', sans-serif;
@@ -167,7 +280,7 @@ import {
   overflow-x: hidden;
 }
 
-/* Background Decor (Similar to Dashboard) */
+/* Background Decor */
 .bg-decor-1 {
   position: absolute;
   top: -100px;
@@ -194,7 +307,7 @@ import {
   z-index: 1;
 }
 
-/* Header */
+/* --- Header --- */
 .glass-header {
   height: 70px;
   background: rgba(255, 255, 255, 0.8);
@@ -207,7 +320,7 @@ import {
 }
 
 .header-inner {
-  max-width: 1000px;
+  max-width: 1200px;
   margin: 0 auto;
   height: 100%;
   display: flex;
@@ -219,7 +332,6 @@ import {
   display: flex;
   align-items: center;
   gap: 12px;
-  cursor: pointer;
 }
 
 .brand-icon-box {
@@ -240,129 +352,349 @@ import {
   line-height: 1.1;
 }
 
-.brand-name { font-weight: 700; font-size: 16px; }
+.brand-name {
+  font-weight: 700;
+  font-size: 16px;
+}
 .text-primary { color: #4f46e5; }
-.brand-tag { font-size: 11px; color: #64748b; font-weight: 500; background: #f1f5f9; padding: 1px 6px; border-radius: 4px; width: fit-content; }
 
-/* Content */
-.main-content {
-  padding: 40px 20px;
+.brand-tag {
+  font-size: 11px;
+  color: #64748b;
+  font-weight: 500;
+  background: #f1f5f9;
+  padding: 1px 6px;
+  border-radius: 4px;
+  width: fit-content;
 }
 
-.content-container {
+.header-nav {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+}
+
+.nav-link {
+  color: #475569;
+  font-weight: 500;
+}
+.nav-link:hover {
+  color: #4f46e5;
+  background: transparent;
+}
+
+.divider {
+  width: 1px;
+  height: 24px;
+  background: #e2e8f0;
+}
+
+.user-profile {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  cursor: pointer;
+  padding: 4px 8px;
+  border-radius: 8px;
+  transition: background 0.2s;
+}
+.user-profile:hover {
+  background: #f1f5f9;
+}
+.user-avatar { background: #e2e8f0; color: #64748b; }
+.username { font-size: 14px; font-weight: 500; color: #334155; }
+.danger-text { color: #ef4444; }
+
+/* --- Hero Section --- */
+.hero-container {
+  text-align: center;
+  padding: 60px 20px;
   max-width: 800px;
   margin: 0 auto;
 }
 
-.page-header {
-  text-align: center;
-  margin-bottom: 60px;
+.status-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 12px;
+  background: #ecfdf5;
+  border: 1px solid #d1fae5;
+  border-radius: 20px;
+  color: #059669;
+  font-size: 12px;
+  font-weight: 600;
+  margin-bottom: 24px;
 }
+.dot {
+  width: 6px;
+  height: 6px;
+  background: #10b981;
+  border-radius: 50%;
+  animation: pulse 2s infinite;
+}
+@keyframes pulse { 0% { opacity: 1; } 50% { opacity: 0.5; } 100% { opacity: 1; } }
 
 .display-title {
-  font-size: 36px;
+  font-size: 48px;
   font-weight: 800;
+  line-height: 1.1;
   color: #0f172a;
-  margin-bottom: 16px;
+  margin: 0 0 20px;
+  letter-spacing: -0.03em;
+}
+
+.gradient-text {
+  background: linear-gradient(135deg, #4f46e5 0%, #a855f7 100%);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
 }
 
 .lead-text {
   font-size: 18px;
   color: #64748b;
   line-height: 1.6;
+  margin-bottom: 40px;
+  max-width: 600px;
+  margin-left: auto;
+  margin-right: auto;
 }
 
-/* Timeline Customization */
-.timeline-container {
-  padding: 0 10px;
-}
-
-.step-card {
-  border-radius: 16px;
-  border: 1px solid #e2e8f0;
-  box-shadow: 0 4px 6px -1px rgba(0,0,0,0.05);
+.primary-cta {
+  border-radius: 100px;
+  padding: 24px 40px;
+  font-weight: 600;
+  font-size: 16px;
+  background: #0f172a;
+  border: none;
   transition: transform 0.2s;
 }
-.step-card:hover {
+.primary-cta:hover {
+  background: #1e293b;
   transform: translateY(-2px);
-  box-shadow: 0 10px 15px -3px rgba(0,0,0,0.1);
 }
 
-.card-header h3 {
-  margin: 0;
+.mini-stats {
+  margin-top: 48px;
   display: flex;
+  justify-content: center;
   align-items: center;
-  gap: 10px;
-  font-size: 18px;
-  font-weight: 600;
-  color: #1e293b;
+  gap: 32px;
 }
-
-.step-icon {
-  font-size: 20px;
-}
-
-.step-card p {
-  color: #475569;
-  line-height: 1.6;
-  margin-bottom: 12px;
-}
-
-.step-card ul {
-  padding-left: 20px;
-  color: #475569;
-  line-height: 1.6;
-}
-.step-card li {
-  margin-bottom: 8px;
-}
-
-/* Process Steps Visualization */
-.process-steps {
+.stat-item {
   display: flex;
-  align-items: center;
+  flex-direction: column;
+}
+.stat-val { font-size: 18px; font-weight: 700; color: #0f172a; }
+.stat-lbl { font-size: 12px; color: #94a3b8; text-transform: uppercase; letter-spacing: 0.05em; }
+.stat-sep { width: 1px; height: 24px; background: #e2e8f0; }
+
+/* --- Features Grid --- */
+.features-section {
+  max-width: 1200px;
+  margin: 0 auto 60px;
+  padding: 0 24px;
+}
+
+.section-header {
+  display: flex;
+  align-items: flex-end;
   justify-content: space-between;
-  background: #f8fafc;
-  padding: 16px;
-  border-radius: 12px;
-  margin-top: 16px;
+  margin-bottom: 40px;
+  text-align: left;
 }
-.p-step {
+.section-header h2 { font-size: 28px; font-weight: 700; color: #0f172a; margin: 0 0 8px; }
+.section-header p { font-size: 16px; color: #64748b; margin: 0; }
+
+@media (max-width: 768px) {
+  .section-header {
+    flex-direction: column;
+    align-items: center;
+    text-align: center;
+    gap: 16px;
+  }
+}
+
+.features-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 24px;
+}
+
+.feature-card {
+  background: white;
+  border-radius: 16px;
+  padding: 32px;
+  border: 1px solid #e2e8f0;
+  transition: all 0.3s ease;
+  cursor: pointer;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+}
+.feature-card:hover {
+  transform: translateY(-5px);
+  border-color: #a5b4fc;
+  box-shadow: 0 10px 20px -5px rgba(79, 70, 229, 0.1);
+}
+
+.f-icon {
+  width: 48px;
+  height: 48px;
+  border-radius: 12px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 24px;
+  color: white;
+  margin-bottom: 24px;
+}
+.bg-blue { background: linear-gradient(135deg, #3b82f6, #2563eb); }
+.bg-purple { background: linear-gradient(135deg, #8b5cf6, #7c3aed); }
+.bg-green { background: linear-gradient(135deg, #10b981, #059669); }
+
+.f-content h3 { font-size: 18px; font-weight: 700; color: #0f172a; margin: 0 0 8px; }
+.f-content p { font-size: 14px; color: #64748b; line-height: 1.6; margin: 0 0 24px; }
+.f-link {
+  font-size: 14px;
+  font-weight: 600;
+  color: #4f46e5;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+/* --- WordCloud --- */
+.wordcloud-section {
+  max-width: 1200px;
+  margin: 0 auto 80px;
+  padding: 0 24px;
+}
+
+.wordcloud-card {
+  border-radius: 20px;
+  border: 1px solid #e2e8f0;
+}
+
+.card-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+.header-title {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  font-size: 18px;
+  font-weight: 700;
+  color: #0f172a;
+}
+
+.wordcloud-wrapper {
+  min-height: 400px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: #fcfcfc;
+  border-radius: 12px;
+  margin-top: 10px;
+}
+
+.wc-image {
+  width: 100%;
+  height: 400px;
+  object-fit: contain;
+}
+
+.loading-state, .empty-state {
   display: flex;
   flex-direction: column;
   align-items: center;
+  gap: 12px;
+  color: #94a3b8;
+}
+.empty-icon {
+  font-size: 48px;
+  color: #cbd5e1;
+  margin-bottom: 8px;
+}
+.empty-state h4 { margin: 0; color: #0f172a; }
+.empty-state p { margin: 0; font-size: 14px; }
+
+/* --- Steps Section --- */
+.steps-section {
+  max-width: 1200px;
+  margin: 0 auto 60px;
+  padding: 0 24px;
+}
+
+.steps-grid {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 24px;
+  margin-top: 40px;
+  flex-wrap: wrap;
+}
+
+.step-card {
+  background: white;
+  padding: 32px;
+  border-radius: 20px;
+  box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.05);
   text-align: center;
   flex: 1;
+  min-width: 250px;
+  border: 1px solid #e2e8f0;
+  transition: all 0.3s ease;
 }
-.p-step span {
-  font-weight: 600;
-  color: #334155;
-  font-size: 14px;
+
+.step-card:hover {
+  transform: translateY(-5px);
+  box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.1);
+  border-color: #a5b4fc;
 }
-.p-step small {
-  font-size: 11px;
-  color: #94a3b8;
-  margin-top: 4px;
+
+.step-icon {
+  width: 64px;
+  height: 64px;
+  border-radius: 16px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin: 0 auto 20px;
+  color: white;
+  font-size: 28px;
 }
-.p-arrow {
+.bg-indigo { background: linear-gradient(135deg, #6366f1, #4f46e5); }
+.bg-pink { background: linear-gradient(135deg, #ec4899, #db2777); }
+.bg-teal { background: linear-gradient(135deg, #14b8a6, #0d9488); }
+
+.step-arrow {
   color: #cbd5e1;
-  font-weight: bold;
-  font-size: 18px;
+  font-size: 24px;
+  display: flex;
+  align-items: center;
 }
 
-.cta-bottom {
-    text-align: center;
-    margin-top: 40px;
-    margin-bottom: 60px;
+@media (max-width: 768px) {
+  .steps-grid { flex-direction: column; }
+  .step-arrow { transform: rotate(90deg); margin: 10px 0; }
 }
 
-@media (max-width: 640px) {
-  .process-steps {
-    flex-direction: column;
-    gap: 16px;
-  }
-  .p-arrow {
-    transform: rotate(90deg);
-  }
+/* --- Footer --- */
+.main-footer {
+  text-align: center;
+  padding: 40px 0;
+  border-top: 1px solid #e2e8f0;
+  color: #94a3b8;
+  font-size: 13px;
+  background: white;
+}
+
+/* --- Responsive --- */
+@media (max-width: 1024px) {
+  .features-grid { grid-template-columns: 1fr; }
+  .display-title { font-size: 36px; }
 }
 </style>
