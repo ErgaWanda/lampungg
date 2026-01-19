@@ -1451,11 +1451,20 @@ def analyze():
                         print(f"   🔄 Executing database insert...")
                         db_start_time = time.time()
                         
+                        # Create analysis session
+                        session_name = file.filename if 'file' in locals() and file and file.filename else f"Analysis {datetime.now().strftime('%Y-%m-%d %H:%M')}"
+                        cursor.execute("""
+                            INSERT INTO analysis_sessions (user_id, session_name, status, total_data, pos_count, neg_count, net_count)
+                            VALUES (%s, %s, %s, %s, %s, %s, %s)
+                        """, (current_user.id, session_name, 'completed', total_data, pos_count, neg_count, net_count))
+                        session_id = cursor.lastrowid
+                        
+                        # Simpan hasil ke database
                         cursor.execute("""
                             INSERT INTO sentiment_results 
-                            (total_data, pos_count, neg_count, net_count, processed_by, data_summary) 
-                            VALUES (%s, %s, %s, %s, %s, %s)
-                        """, (total_data, pos_count, neg_count, net_count, current_user.username, data_summary_json))
+                            (session_id, user_id, total_data, pos_count, neg_count, net_count, processed_by, data_summary) 
+                            VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+                        """, (session_id, current_user.id, total_data, pos_count, neg_count, net_count, current_user.username, data_summary_json))
                         
                         connection.commit()
                         cursor.close()
@@ -1599,17 +1608,23 @@ def admin_dashboard_stats():
         
         cursor = connection.cursor(dictionary=True)
         
-        # Ambil hasil analisis terakhir
+        # Ambil hasil analisis terakhir yang valid (memiliki data)
         cursor.execute("""
             SELECT * FROM sentiment_results 
+            WHERE total_data > 0
             ORDER BY analysis_date DESC 
             LIMIT 1
         """)
         latest_result = cursor.fetchone()
+        
+        # Fallback jika tidak ada data dengan total_data > 0, ambil yang terakhir
+        if not latest_result:
+             cursor.execute("SELECT * FROM sentiment_results ORDER BY analysis_date DESC LIMIT 1")
+             latest_result = cursor.fetchone()
 
         # Ambil tren 5 analisis terakhir
         cursor.execute("""
-            SELECT analysis_date, pos_count, neg_count, net_count, filename, total_data
+            SELECT analysis_date, pos_count, neg_count, net_count, total_data
             FROM sentiment_results 
             ORDER BY analysis_date DESC 
             LIMIT 5
@@ -1622,11 +1637,10 @@ def admin_dashboard_stats():
             # Reverse to show oldest to newest in chart
             for res in reversed(trend_results):
                 trend_data.append({
-                    'date': res['analysis_date'],
+                    'date': str(res['analysis_date']),
                     'positive': res['pos_count'],
                     'negative': res['neg_count'],
                     'neutral': res['net_count'],
-                    'filename': res.get('filename', 'Unknown'),
                     'total': res['total_data']
                 })
 
@@ -1635,40 +1649,76 @@ def admin_dashboard_stats():
         total_users = cursor.fetchone()['total']
 
         # Ambil total analisis dan total ulasan diproses
-        cursor.execute("SELECT COUNT(*) as total_analyses, SUM(total_data) as total_reviews FROM sentiment_results")
+        cursor.execute("""
+            SELECT 
+                COUNT(*) as total_analyses, 
+                SUM(total_data) as total_reviews,
+                SUM(pos_count) as total_pos,
+                SUM(neg_count) as total_neg,
+                SUM(net_count) as total_net
+            FROM sentiment_results
+        """)
         stats_agg = cursor.fetchone()
         
         # Ambil data_summary dari analisis terakhir untuk Top Words
         cursor.execute("SELECT data_summary FROM sentiment_results ORDER BY analysis_date DESC LIMIT 1")
         latest_data_row = cursor.fetchone()
         
-        top_words = []
+        top_words_pos = []
+        top_words_neg = []
+        avg_confidence = 0
+        
         if latest_data_row and latest_data_row['data_summary']:
             try:
                 data = json.loads(latest_data_row['data_summary'])
                 # Batasi data jika terlalu besar untuk performa
-                if len(data) > 1000:
-                    data = data[:1000]
-                    
-                all_text = " ".join([str(item.get('text_clean', '')) for item in data])
-                words = all_text.split()
-                # Filter stopwords dan non-alphanumeric
-                clean_words = [w for w in words if w.lower() not in custom_stopwords and w.isalnum() and len(w) > 3]
+                if len(data) > 2000:
+                    data = data[:2000]
                 
-                from collections import Counter
-                word_counts = Counter(clean_words).most_common(15)
-                # Normalisasi ukuran untuk tag cloud (1-10)
-                if word_counts:
-                    max_count = word_counts[0][1]
-                    min_count = word_counts[-1][1]
-                    diff = max_count - min_count
-                    if diff == 0: diff = 1
+                # Helper function untuk extract top words
+                def get_top_words(data_subset, limit=10):
+                    if not data_subset: return []
+                    all_text = " ".join([str(item.get('text_clean', item.get('text_asli', ''))) for item in data_subset])
+                    words = all_text.split()
+                    clean_words = [w for w in words if w.lower() not in custom_stopwords and w.isalnum() and len(w) > 3]
                     
-                    top_words = []
-                    for w, c in word_counts:
-                        size = 1 + ((c - min_count) / diff) * 9  # Skala 1-10
-                        top_words.append({'text': w, 'value': c, 'size': round(size)})
+                    from collections import Counter
+                    word_counts = Counter(clean_words).most_common(limit)
+                    
+                    result = []
+                    if word_counts:
+                        max_count = word_counts[0][1]
+                        min_count = word_counts[-1][1]
+                        diff = max_count - min_count
+                        if diff == 0: diff = 1
                         
+                        for w, c in word_counts:
+                            size = 1 + ((c - min_count) / diff) * 9
+                            result.append({'text': w, 'value': c, 'size': round(size)})
+                    return result
+
+                # Filter data per sentimen
+                data_pos = [d for d in data if d.get('Sentimen Prediksi') == 'Positif']
+                data_neg = [d for d in data if d.get('Sentimen Prediksi') == 'Negatif']
+                
+                top_words_pos = get_top_words(data_pos, 10)
+                top_words_neg = get_top_words(data_neg, 10)
+                
+                # Hitung Rata-rata Confidence (Probabilitas)
+                valid_probs = []
+                for d in data:
+                    prob = d.get('Probabilitas')
+                    if prob is not None and str(prob).lower() != 'nan':
+                        try:
+                            valid_probs.append(float(prob))
+                        except (ValueError, TypeError):
+                            pass
+                            
+                if valid_probs:
+                    avg_confidence = round((sum(valid_probs) / len(valid_probs)) * 100, 1)
+                else:
+                    avg_confidence = 0
+
             except Exception as e:
                 print(f"Error extracting top words: {e}")
 
@@ -1678,7 +1728,9 @@ def admin_dashboard_stats():
         response_data = {
             'latest_analysis': None,
             'trend_data': trend_data,
-            'top_words': top_words,
+            'top_words_pos': top_words_pos,
+            'top_words_neg': top_words_neg,
+            'avg_confidence': avg_confidence,
             'system_stats': {
                 'total_users': total_users,
                 'total_analyses': stats_agg['total_analyses'] if stats_agg else 0,
@@ -1717,12 +1769,11 @@ def admin_dashboard_stats():
                     insight_type = "info"
 
             response_data['latest_analysis'] = {
-                'date': latest_result['analysis_date'],
-                'total': latest_result['total_data'],
-                'positive': latest_result['pos_count'],
-                'negative': latest_result['neg_count'],
-                'neutral': latest_result['net_count'],
-                'filename': latest_result.get('filename', 'Unknown'),
+                'date': str(latest_result['analysis_date']),
+                'total': int(latest_result['total_data']),
+                'positive': int(latest_result['pos_count']),
+                'negative': int(latest_result['neg_count']),
+                'neutral': int(latest_result['net_count']),
                 'insight': insight,
                 'insight_type': insight_type
             }
