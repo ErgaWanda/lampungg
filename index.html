@@ -1451,20 +1451,12 @@ def analyze():
                         print(f"   🔄 Executing database insert...")
                         db_start_time = time.time()
                         
-                        # Create analysis session
-                        session_name = file.filename if 'file' in locals() and file and file.filename else f"Analysis {datetime.now().strftime('%Y-%m-%d %H:%M')}"
-                        cursor.execute("""
-                            INSERT INTO analysis_sessions (user_id, session_name, status, total_data, pos_count, neg_count, net_count)
-                            VALUES (%s, %s, %s, %s, %s, %s, %s)
-                        """, (current_user.id, session_name, 'completed', total_data, pos_count, neg_count, net_count))
-                        session_id = cursor.lastrowid
-                        
-                        # Simpan hasil ke database
+                        # Simpan hasil ke database (tanpa session_id dan file_name)
                         cursor.execute("""
                             INSERT INTO sentiment_results 
-                            (session_id, user_id, total_data, pos_count, neg_count, net_count, processed_by, data_summary) 
-                            VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
-                        """, (session_id, current_user.id, total_data, pos_count, neg_count, net_count, current_user.username, data_summary_json))
+                            (user_id, total_data, pos_count, neg_count, net_count, processed_by, data_summary, analysis_date) 
+                            VALUES (%s, %s, %s, %s, %s, %s, %s, NOW())
+                        """, (current_user.id, total_data, pos_count, neg_count, net_count, current_user.username, data_summary_json))
                         
                         connection.commit()
                         cursor.close()
