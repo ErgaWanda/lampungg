@@ -1,402 +1,2443 @@
-<template>
-  <div class="auth-layout">
-    <div class="bg-decor-1"></div>
-    <div class="bg-decor-2"></div>
+import os
+import pandas as pd
+import numpy as np
+import joblib
+from flask import Flask, render_template, request, redirect, url_for, send_file, jsonify, session
+from transformers import BertTokenizer, BertForSequenceClassification
+import mysql.connector
+from mysql.connector import Error
+from flask_login import LoginManager, UserMixin, login_user, login_required, logout_user, current_user
+from werkzeug.security import generate_password_hash, check_password_hash
+import torch
+from scipy.special import softmax
+import io
+import json
+import sys
+import base64
+from wordcloud import WordCloud
+import matplotlib
 
-    <el-container class="layout-container">
-      <el-aside width="260px" class="sidebar">
-        <div class="brand-area">
-          <div class="brand-icon">
-            <el-icon><TrendCharts /></el-icon>
-          </div>
-          <h2 class="brand-text">Sentimen<span class="text-primary">Pro</span></h2>
-        </div>
+matplotlib.use('Agg')  # Set backend ke non-GUI mode
+import matplotlib.pyplot as plt
+import plotly.graph_objs as go
+import plotly.utils
+import xlsxwriter
+from datetime import datetime
+import time
+import logging
+from PIL import Image
+from functools import wraps
+from flask import make_response
+import ast
 
-        <el-menu default-active="1" class="custom-menu" router>
-          <div class="menu-label">MENU PUBLIK</div>
-          <el-menu-item index="/login">
-            <el-icon><House /></el-icon>
-            <span>Beranda</span>
-          </el-menu-item>
-          <el-menu-item index="/about">
-            <el-icon><InfoFilled /></el-icon>
-            <span>Tentang Aplikasi</span>
-          </el-menu-item>
-          <el-menu-item index="/help">
-            <el-icon><QuestionFilled /></el-icon>
-            <span>Bantuan</span>
-          </el-menu-item>
-        </el-menu>
+os.environ['PYTORCH_CUDA_ALLOC_CONF'] = 'max_split_size_mb:128'
 
-        <div class="sidebar-footer">
-          <p class="copyright">2026 SentimenPro System</p>
-        </div>
-      </el-aside>
+# Konfigurasi logging
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
-      <el-container>
-        <el-header class="main-header">
-          <div class="header-left">
-            <h3>Daftar Akun</h3>
-          </div>
-          <div class="header-right">
-            <el-button round @click="goToLogin">
-              Kembali ke Login
-            </el-button>
-          </div>
-        </el-header>
+# Import modul NLP kompleks
+try:
+    from nlp_utils import preprocess_text, preprocess_dataframe, custom_stopwords
+except ImportError:
+    print("🚨 FATAL ERROR: nlp_utils.py tidak ditemukan. Harap buat file tersebut.")
+    def preprocess_text(text): return str(text)
+    def preprocess_dataframe(df, col): return df
+    custom_stopwords = set()
 
-        <el-main class="main-content">
-          <div class="card-wrapper">
-            <div class="register-card">
-              <div class="form-header">
-                <h2>Buat Akun Baru</h2>
-                <p>Isi data berikut untuk membuat akun.</p>
-              </div>
+# --- Konfigurasi Aplikasi ---
+app = Flask(__name__)
+UPLOAD_FOLDER = 'uploads'
+MODEL_PATH = './sentiment_model'
+ALLOWED_EXTENSIONS = {'csv', 'xlsx'}
+LABEL_MAPPING = {0: 'Negatif', 1: 'Positif', 2: 'Netral'}
+NUM_LABELS = len(LABEL_MAPPING) 
 
-              <el-form
-                ref="registerForm"
-                :model="form"
-                :rules="rules"
-                class="custom-form"
-                @submit.prevent="handleRegister"
-              >
-                <el-form-item prop="username" class="custom-field">
-                  <div class="field-label">Username</div>
-                  <el-input
-                    v-model="form.username"
-                    placeholder="Contoh: user123"
-                    size="large"
-                    :prefix-icon="User"
-                  />
-                </el-form-item>
+app.config['UPLOAD_FOLDER'] = UPLOAD_FOLDER
+os.makedirs(UPLOAD_FOLDER, exist_ok=True) 
+DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-                <el-form-item prop="password" class="custom-field">
-                  <div class="field-label">Password</div>
-                  <el-input
-                    v-model="form.password"
-                    type="password"
-                    placeholder="••••••••"
-                    size="large"
-                    :prefix-icon="Lock"
-                    show-password
-                  />
-                </el-form-item>
-
-                <el-form-item prop="confirmPassword" class="custom-field">
-                  <div class="field-label">Konfirmasi Password</div>
-                  <el-input
-                    v-model="form.confirmPassword"
-                    type="password"
-                    placeholder="••••••••"
-                    size="large"
-                    :prefix-icon="Lock"
-                    show-password
-                  />
-                </el-form-item>
-
-                <el-button
-                  type="primary"
-                  size="large"
-                  class="submit-btn"
-                  :loading="loading"
-                  @click="handleRegister"
-                >
-                  Daftar
-                  <el-icon class="el-icon--right"><Right /></el-icon>
-                </el-button>
-              </el-form>
-            </div>
-          </div>
-        </el-main>
-      </el-container>
-    </el-container>
-  </div>
-</template>
-
-<script setup>
-import { reactive, ref } from 'vue'
-import { useRouter } from 'vue-router'
-import { ElMessage } from 'element-plus'
-import { House, InfoFilled, Lock, QuestionFilled, Right, TrendCharts, User } from '@element-plus/icons-vue'
-import api from '@/services/api'
-
-const router = useRouter()
-const registerForm = ref()
-const loading = ref(false)
-
-const form = reactive({
-  username: '',
-  password: '',
-  confirmPassword: ''
-})
-
-const rules = {
-  username: [
-    { required: true, message: 'Harap isi username', trigger: 'blur' },
-    { min: 3, message: 'Username minimal 3 karakter', trigger: 'blur' }
-  ],
-  password: [
-    { required: true, message: 'Harap isi password', trigger: 'blur' },
-    { min: 4, message: 'Password terlalu pendek', trigger: 'blur' }
-  ],
-  confirmPassword: [
-    { required: true, message: 'Harap isi konfirmasi password', trigger: 'blur' },
-    {
-      validator: (_rule, value, callback) => {
-        if (!value) {
-          callback(new Error('Harap isi konfirmasi password'))
-          return
-        }
-        if (value !== form.password) {
-          callback(new Error('Konfirmasi password tidak sama'))
-          return
-        }
-        callback()
-      },
-      trigger: 'blur'
-    }
-  ]
+# --- Konfigurasi MySQL ---
+MYSQL_CONFIG = {
+    'host': 'localhost',
+    'user': 'root',
+    'password': '', # GANTI DENGAN PASSWORD ANDA, atau '' jika tanpa PW
+    'database': 'sentiment_db'
 }
 
-const goToLogin = () => {
-  router.push('/login')
-}
+def create_default_admin():
+    """Membuat user admin default jika belum ada"""
+    try:
+        connection = get_db_connection()
+        if connection:
+            cursor = connection.cursor(dictionary=True)
+            cursor.execute("SELECT * FROM users WHERE username = %s", ('admin',))
+            admin_user = cursor.fetchone()
+            
+            if not admin_user:
+                # Buat user admin default
+                hashed_password = generate_password_hash('admin123')
+                cursor.execute("""
+                    INSERT INTO users (username, password_hash) 
+                    VALUES (%s, %s)
+                """, ('admin', hashed_password))
+                connection.commit()
+                print("✅ Default admin user created: admin/admin123")
+            else:
+                print("✅ Admin user already exists")
+            
+            cursor.close()
+            connection.close()
+    except Exception as e:
+        print(f"❌ Error creating default admin: {e}")
 
-const handleRegister = async () => {
-  if (!registerForm.value) return
+def get_db_connection():
+    try:
+        connection = mysql.connector.connect(**MYSQL_CONFIG, buffered=True)
+        # Test the connection with a simple query
+        cursor = connection.cursor()
+        cursor.execute("SELECT 1")
+        cursor.fetchone()  # Consume the result
+        cursor.close()
+        return connection
+    except Error as e:
+        print(f"Error connecting to MySQL Database: {e}")
+        return None
 
-  try {
-    await registerForm.value.validate()
-    loading.value = true
+# --- Konfigurasi Flask-Login ---
+app.config['SECRET_KEY'] = 'kunci_rahasia_untuk_session_management'
+login_manager = LoginManager()
+login_manager.init_app(app)
+login_manager.login_view = 'login'
 
-    const payload = { username: form.username, password: form.password }
-    await api.post('/auth/register', payload)
+# Import user management models setelah app dibuat
+from models import User, UserManager, user_manager
 
-    ElMessage.success({
-      message: 'Registrasi berhasil. Silakan login.',
-      type: 'success',
-      plain: true
+# Global Model Variables
+tokenizer = None
+model = None
+MODEL_LOADED = False
+training_metrics = None
+global_df_results = pd.DataFrame() 
+
+@login_manager.user_loader
+def load_user(user_id):
+    return user_manager.get_user_by_id(user_id)
+
+@app.before_request
+def _api_options_preflight():
+    if request.method == 'OPTIONS' and request.path.startswith('/api/'):
+        return make_response('', 204)
+
+@app.after_request
+def _add_api_cors_headers(response):
+    if request.path.startswith('/api/'):
+        response.headers['Access-Control-Allow-Origin'] = 'http://localhost:3000'
+        response.headers['Access-Control-Allow-Credentials'] = 'true'
+        response.headers['Access-Control-Allow-Headers'] = 'Content-Type, Authorization'
+        response.headers['Access-Control-Allow-Methods'] = 'GET, POST, PUT, PATCH, DELETE, OPTIONS'
+    return response
+
+def _require_admin(fn):
+    @wraps(fn)
+    def wrapper(*args, **kwargs):
+        if not current_user.is_authenticated:
+            return jsonify({'message': 'Unauthorized'}), 401
+        if not current_user.is_admin():
+            return jsonify({'message': 'Forbidden'}), 403
+        return fn(*args, **kwargs)
+    return wrapper
+
+def _safe_parse_date(value):
+    if not value:
+        return None
+    try:
+        return datetime.strptime(value, '%Y-%m-%d')
+    except Exception:
+        return None
+
+def _fetch_latest_sentiment_result(connection, start_date=None, end_date=None, processed_by=None):
+    cursor = connection.cursor(dictionary=True)
+    query = "SELECT * FROM sentiment_results"
+    clauses = []
+    params = []
+
+    if start_date:
+        clauses.append('analysis_date >= %s')
+        params.append(start_date)
+    if end_date:
+        clauses.append('analysis_date <= %s')
+        params.append(end_date)
+    if processed_by:
+        clauses.append('processed_by = %s')
+        params.append(processed_by)
+
+    if clauses:
+        query += ' WHERE ' + ' AND '.join(clauses)
+
+    query += ' ORDER BY analysis_date DESC LIMIT 1'
+    cursor.execute(query, tuple(params))
+    row = cursor.fetchone()
+    cursor.close()
+    return row
+
+@app.route('/api/auth/login', methods=['POST'])
+def api_login():
+    data = request.get_json(silent=True) or {}
+    username = data.get('username')
+    password = data.get('password')
+
+    if not username or not password:
+        return jsonify({'message': 'Username dan password wajib diisi'}), 400
+
+    user, auth_error = user_manager.authenticate_user(username, password)
+    if not user:
+        return jsonify({'message': auth_error or 'Login gagal'}), 401
+
+    login_user(user)
+    return jsonify({
+        'user': {
+            'id': user.id,
+            'username': user.username,
+            'role': 'admin' if user.is_admin() else 'user',
+            'is_admin': user.is_admin(),
+            'permissions': user.get_permissions()
+        }
     })
 
-    router.push('/login')
-  } catch (error) {
-    // Error message handled by axios interceptor
-  } finally {
-    loading.value = false
-  }
-}
-</script>
+@app.route('/api/auth/register', methods=['POST'])
+def api_register():
+    data = request.get_json(silent=True) or {}
+    username = (data.get('username') or '').strip()
+    password = data.get('password') or ''
 
-<style scoped>
-@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
+    if not username or not password:
+        return jsonify({'message': 'Username dan password wajib diisi'}), 400
+    if len(username) < 3:
+        return jsonify({'message': 'Username minimal 3 karakter'}), 400
+    if len(password) < 4:
+        return jsonify({'message': 'Password minimal 4 karakter'}), 400
 
-.auth-layout {
-  min-height: 100vh;
-  background-color: #f8fafc;
-  font-family: 'Inter', sans-serif;
-  position: relative;
-  overflow: hidden;
-}
+    created, msg = user_manager.create_user(username, password)
+    if not created:
+        return jsonify({'message': msg or 'Registrasi gagal'}), 400
 
-.layout-container {
-  min-height: 100vh;
-  position: relative;
-  z-index: 10;
-}
+    return jsonify({'success': True, 'message': msg}), 201
 
-.bg-decor-1 {
-  position: absolute;
-  top: -10%;
-  left: -5%;
-  width: 600px;
-  height: 600px;
-  background: radial-gradient(circle, rgba(99, 102, 241, 0.08) 0%, rgba(255,255,255,0) 70%);
-  border-radius: 50%;
-  z-index: 0;
-}
+@app.route('/api/auth/logout', methods=['POST'])
+@login_required
+def api_logout():
+    logout_user()
+    return jsonify({'success': True})
 
-.bg-decor-2 {
-  position: absolute;
-  bottom: -10%;
-  right: -5%;
-  width: 500px;
-  height: 500px;
-  background: radial-gradient(circle, rgba(236, 72, 153, 0.08) 0%, rgba(255,255,255,0) 70%);
-  border-radius: 50%;
-  z-index: 0;
-}
+@app.route('/api/auth/me', methods=['GET'])
+@login_required
+def api_me():
+    return jsonify({
+        'user': {
+            'id': current_user.id,
+            'username': current_user.username,
+            'role': 'admin' if current_user.is_admin() else 'user',
+            'is_admin': current_user.is_admin(),
+            'permissions': current_user.get_permissions()
+        }
+    })
 
-.sidebar {
-  background: white;
-  border-right: 1px solid #e2e8f0;
-  display: flex;
-  flex-direction: column;
-}
+@app.route('/api/user/results/summary', methods=['GET'])
+@login_required
+def api_user_results_summary():
+    start_date = _safe_parse_date(request.args.get('start_date'))
+    end_date = _safe_parse_date(request.args.get('end_date'))
 
-.brand-area {
-  height: 80px;
-  display: flex;
-  align-items: center;
-  padding: 0 24px;
-  gap: 12px;
-}
+    connection = get_db_connection()
+    if not connection:
+        return jsonify({'message': 'Database connection failed'}), 500
 
-.brand-icon {
-  width: 32px;
-  height: 32px;
-  background: linear-gradient(135deg, #4f46e5 0%, #6366f1 100%);
-  border-radius: 8px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  color: white;
-}
+    try:
+        latest = _fetch_latest_sentiment_result(connection, start_date=start_date, end_date=end_date)
+        if not latest:
+            return jsonify({'positif': 0, 'negatif': 0, 'netral': 0, 'avg_polarity': 0}), 200
 
-.brand-text {
-  font-size: 18px;
-  font-weight: 700;
-  color: #0f172a;
-  margin: 0;
-}
+        return jsonify({
+            'positif': int(latest.get('pos_count') or 0),
+            'negatif': int(latest.get('neg_count') or 0),
+            'netral': int(latest.get('net_count') or 0),
+            'avg_polarity': 0
+        })
+    finally:
+        connection.close()
 
-.text-primary { color: #4f46e5; }
+@app.route('/api/user/results/wordcloud', methods=['GET'])
+@login_required
+def api_user_results_wordcloud():
+    sentiment = request.args.get('sentiment')
+    start_date = _safe_parse_date(request.args.get('start_date'))
+    end_date = _safe_parse_date(request.args.get('end_date'))
 
-.custom-menu {
-  border-right: none;
-  padding-top: 20px;
-  flex: 1;
-}
+    connection = get_db_connection()
+    if not connection:
+        return jsonify({'message': 'Database connection failed'}), 500
 
-:deep(.el-menu-item) {
-  margin: 4px 12px;
-  border-radius: 8px;
-  height: 44px;
-  line-height: 44px;
-  color: #64748b;
-}
+    try:
+        latest = _fetch_latest_sentiment_result(connection, start_date=start_date, end_date=end_date)
+        if not latest:
+            return jsonify({'image': None})
 
-:deep(.el-menu-item.is-active) {
-  background-color: #f1f5f9;
-  color: #0f172a;
-  font-weight: 600;
-}
+        records = []
+        try:
+            if latest.get('data_summary'):
+                raw = latest.get('data_summary')
+                try:
+                    records = json.loads(raw)
+                except Exception:
+                    records = ast.literal_eval(raw)
+        except Exception:
+            records = []
 
-:deep(.el-menu-item:hover) {
-  background-color: #f8fafc;
-}
+        if not isinstance(records, list):
+            records = []
 
-.menu-label {
-  padding: 0 24px;
-  margin-bottom: 8px;
-  font-size: 11px;
-  font-weight: 700;
-  color: #94a3b8;
-  letter-spacing: 0.05em;
-}
+        wanted = None
+        if sentiment and str(sentiment).lower() != 'all':
+            wanted = str(sentiment).title()
 
-.sidebar-footer {
-  padding: 24px;
-  border-top: 1px solid #f1f5f9;
-}
+        parts = []
+        for item in records:
+            try:
+                label = item.get('Sentimen Prediksi') or item.get('sentimen') or item.get('label')
+                label = str(label) if label is not None else ''
+                label_norm = label.title() if label else ''
 
-.copyright {
-  font-size: 12px;
-  color: #94a3b8;
-  margin: 0;
-}
+                if wanted and label_norm != wanted:
+                    continue
 
-.main-header {
-  height: 80px;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 0 40px;
-}
+                text_val = (
+                    item.get('text_clean') or item.get('text') or item.get('komentar') or item.get('teks') or
+                    item.get('Text') or item.get('Komentar') or item.get('Teks') or ''
+                )
+                text_val = str(text_val).strip()
+                if text_val:
+                    parts.append(text_val)
+            except Exception:
+                continue
 
-.header-left h3 {
-  margin: 0;
-  font-size: 20px;
-  color: #0f172a;
-}
+        text_data = ' '.join(parts)
+        if not text_data.strip():
+            return jsonify({'image': None})
 
-.main-content {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  padding: 20px;
-}
+        wc_sentiment = wanted or 'All'
+        img = create_wordcloud(text_data, wc_sentiment)
+        if not img:
+            return jsonify({'image': None})
 
-.card-wrapper {
-  width: 100%;
-  max-width: 700px;
-}
+        img_buffer = io.BytesIO()
+        img.save(img_buffer, format='PNG')
+        img_buffer.seek(0)
+        image_base64 = base64.b64encode(img_buffer.getvalue()).decode()
+        return jsonify({'image': f"data:image/png;base64,{image_base64}"})
+    finally:
+        connection.close()
 
-.register-card {
-  background: white;
-  border-radius: 24px;
-  box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.1);
-  padding: 50px;
-  border: 1px solid #e2e8f0;
-}
+@app.route('/api/user/results', methods=['GET'])
+@login_required
+def api_user_results_list():
+    sentiment = request.args.get('sentiment')
+    page = request.args.get('page', 1, type=int)
+    per_page = request.args.get('per_page', 20, type=int)
+    start_date = _safe_parse_date(request.args.get('start_date'))
+    end_date = _safe_parse_date(request.args.get('end_date'))
 
-.form-header {
-  margin-bottom: 24px;
-}
+    page = max(1, page)
+    per_page = min(max(1, per_page), 200)
 
-.form-header h2 {
-  margin: 0 0 8px;
-  font-size: 26px;
-  font-weight: 800;
-  color: #0f172a;
-}
+    connection = get_db_connection()
+    if not connection:
+        return jsonify({'message': 'Database connection failed'}), 500
 
-.form-header p {
-  margin: 0;
-  color: #64748b;
-}
+    try:
+        latest = _fetch_latest_sentiment_result(connection, start_date=start_date, end_date=end_date)
+        if not latest:
+            return jsonify({
+                'data': [],
+                'total': 0,
+                'page': page,
+                'per_page': per_page,
+                'summary': {'positif': 0, 'negatif': 0, 'netral': 0, 'tidak_valid': 0},
+                'analysis': None
+            })
 
-.custom-field {
-  margin-bottom: 20px;
-}
+        records = []
+        try:
+            if latest.get('data_summary'):
+                raw = latest.get('data_summary')
+                try:
+                    records = json.loads(raw)
+                except Exception:
+                    # Fallback for non-strict JSON (e.g. single quotes / Python repr)
+                    records = ast.literal_eval(raw)
+        except Exception:
+            records = []
 
-.field-label {
-  font-size: 14px;
-  font-weight: 600;
-  color: #334155;
-  margin-bottom: 8px;
-}
+        mapped = []
+        counts = {'Positif': 0, 'Negatif': 0, 'Netral': 0, 'Tidak Valid': 0}
 
-:deep(.el-input__wrapper) {
-  padding: 12px 16px;
-  border-radius: 12px;
-  box-shadow: 0 0 0 1px #e2e8f0 inset;
-  transition: all 0.2s;
-  background-color: #f8fafc;
-}
+        for idx, item in enumerate(records, start=1):
+            label = item.get('Sentimen Prediksi') or item.get('sentimen') or item.get('label')
+            label = str(label) if label is not None else ''
+            label_norm = label.title() if label else ''
 
-:deep(.el-input__wrapper.is-focus) {
-  background-color: white;
-  box-shadow: 0 0 0 2px #6366f1 inset !important;
-}
+            if label_norm in counts:
+                counts[label_norm] += 1
 
-.submit-btn {
-  height: 50px;
-  border-radius: 12px;
-  font-size: 16px;
-  font-weight: 600;
-  background: #0f172a;
-  border-color: #0f172a;
-  width: 100%;
-}
+            mapped.append({
+                'no': idx,
+                'text': item.get('text') or item.get('komentar') or item.get('teks') or item.get('Text') or item.get('Komentar') or item.get('Teks') or item.get('text_clean') or '',
+                'label': label_norm,
+                'confidence': item.get('Probabilitas'),
+                'text_clean': item.get('text_clean')
+            })
 
-.submit-btn:hover {
-  background: #1e293b;
-  border-color: #1e293b;
-}
+        # Filter by sentiment tab
+        if sentiment and str(sentiment).lower() != 'all':
+            wanted = str(sentiment).title()
+            mapped = [r for r in mapped if r.get('label') == wanted]
 
-@media (max-width: 900px) {
-  .sidebar { display: none; }
-  .main-header { padding: 0 20px; }
-  .register-card { padding: 36px; }
-}
-</style>
+        total = len(mapped)
+        offset = (page - 1) * per_page
+        sliced = mapped[offset: offset + per_page]
+
+        return jsonify({
+            'data': sliced,
+            'total': total,
+            'page': page,
+            'per_page': per_page,
+            'summary': {
+                'positif': int(counts.get('Positif', 0)),
+                'negatif': int(counts.get('Negatif', 0)),
+                'netral': int(counts.get('Netral', 0)),
+                'tidak_valid': int(counts.get('Tidak Valid', 0))
+            },
+            'analysis': {
+                'id': int(latest.get('id')),
+                'analysis_date': latest.get('analysis_date').isoformat() if latest.get('analysis_date') else None,
+                'processed_by': latest.get('processed_by'),
+                'total_data': int(latest.get('total_data') or 0)
+            }
+        })
+    finally:
+        connection.close()
+
+@app.route('/api/admin/upload', methods=['POST'])
+@login_required
+@_require_admin
+def api_admin_upload():
+    if 'file' not in request.files or request.files['file'].filename == '':
+        return jsonify({'message': 'Pilih file sebelum mengunggah.'}), 400
+
+    session['analysis_progress'] = 0
+    session['analysis_status'] = 'Starting...'
+    session['analysis_detail'] = 'Initializing...'
+
+    result_response = analyze()
+
+    if session.get('analysis_status') == 'Error':
+        return jsonify({'message': session.get('analysis_detail') or 'Analisis gagal'}), 400
+
+    connection = get_db_connection()
+    if not connection:
+        return jsonify({'message': 'Database connection failed'}), 500
+
+    try:
+        latest = _fetch_latest_sentiment_result(connection, processed_by=current_user.username)
+        if not latest:
+            return jsonify({'message': 'Analisis selesai, namun hasil tidak ditemukan di database'}), 500
+
+        return jsonify({
+            'id': int(latest.get('id')),
+            'total_data': int(latest.get('total_data') or 0),
+            'pos_count': int(latest.get('pos_count') or 0),
+            'neg_count': int(latest.get('neg_count') or 0),
+            'net_count': int(latest.get('net_count') or 0),
+            'processed_by': latest.get('processed_by'),
+            'analysis_date': latest.get('analysis_date').isoformat() if latest.get('analysis_date') else None
+        })
+    finally:
+        connection.close()
+
+@app.route('/api/admin/analyses', methods=['GET'])
+@login_required
+@_require_admin
+def api_admin_analyses_list():
+    page = request.args.get('page', 1, type=int)
+    per_page = request.args.get('per_page', 10, type=int)
+    start_date = _safe_parse_date(request.args.get('start_date'))
+    end_date = _safe_parse_date(request.args.get('end_date'))
+    search = request.args.get('search')
+
+    offset = max(0, (page - 1) * per_page)
+
+    connection = get_db_connection()
+    if not connection:
+        return jsonify({'message': 'Database connection failed'}), 500
+
+    try:
+        cursor = connection.cursor(dictionary=True)
+
+        where = []
+        params = []
+        if start_date:
+            where.append('analysis_date >= %s')
+            params.append(start_date)
+        if end_date:
+            where.append('analysis_date <= %s')
+            params.append(end_date)
+        if search:
+            where.append('(processed_by LIKE %s)')
+            params.append(f"%{search}%")
+
+        where_sql = (' WHERE ' + ' AND '.join(where)) if where else ''
+
+        cursor.execute(f"SELECT COUNT(*) as total FROM sentiment_results{where_sql}", tuple(params))
+        total = int((cursor.fetchone() or {}).get('total') or 0)
+
+        cursor.execute(
+            f"""
+                SELECT id, total_data, pos_count, neg_count, net_count, processed_by, analysis_date
+                FROM sentiment_results
+                {where_sql}
+                ORDER BY analysis_date DESC
+                LIMIT %s OFFSET %s
+            """,
+            tuple(params + [per_page, offset])
+        )
+
+        rows = cursor.fetchall() or []
+        cursor.close()
+
+        data = []
+        for r in rows:
+            data.append({
+                'id': int(r.get('id')),
+                'filename': None,
+                'processed_by': r.get('processed_by'),
+                'created_at': r.get('analysis_date').isoformat() if r.get('analysis_date') else None,
+                'summary': {
+                    'positif': int(r.get('pos_count') or 0),
+                    'negatif': int(r.get('neg_count') or 0),
+                    'netral': int(r.get('net_count') or 0)
+                },
+                'total_data': int(r.get('total_data') or 0)
+            })
+
+        return jsonify({'data': data, 'total': total})
+    finally:
+        connection.close()
+
+@app.route('/api/admin/analyses/<int:analysis_id>', methods=['GET'])
+@login_required
+@_require_admin
+def api_admin_analyses_detail(analysis_id):
+    page = request.args.get('page', 1, type=int)
+    per_page = request.args.get('per_page', 50, type=int)
+    sentiment = request.args.get('sentiment')
+    offset = max(0, (page - 1) * per_page)
+
+    connection = get_db_connection()
+    if not connection:
+        return jsonify({'message': 'Database connection failed'}), 500
+
+    try:
+        cursor = connection.cursor(dictionary=True)
+        cursor.execute("SELECT * FROM sentiment_results WHERE id = %s", (analysis_id,))
+        row = cursor.fetchone()
+        cursor.close()
+
+        if not row:
+            return jsonify({'message': 'Not found'}), 404
+
+        details_all = []
+        try:
+            if row.get('data_summary'):
+                details_all = json.loads(row.get('data_summary'))
+        except Exception:
+            details_all = []
+
+        if sentiment and str(sentiment).lower() != 'all':
+            wanted = str(sentiment).title()
+            filtered = []
+            for item in details_all:
+                label = item.get('Sentimen Prediksi') or item.get('sentimen') or item.get('label')
+                label = str(label) if label is not None else ''
+                label_norm = label.title() if label else ''
+                if label_norm == wanted:
+                    filtered.append(item)
+            details_filtered = filtered
+        else:
+            details_filtered = details_all
+
+        total_details = len(details_filtered)
+        paginated = details_filtered[offset: offset + per_page]
+
+        mapped_details = []
+        for idx, item in enumerate(paginated, start=offset + 1):
+            label = item.get('Sentimen Prediksi') or item.get('sentimen') or item.get('label')
+            label = str(label) if label is not None else ''
+            label_norm = label.title() if label else ''
+            mapped_details.append({
+                'comment_id': None,
+                'no': idx,
+                'text': item.get('text') or item.get('komentar') or item.get('teks') or item.get('Text') or item.get('Komentar') or item.get('Teks') or item.get('text_clean') or '',
+                'text_clean': item.get('text_clean'),
+                'polarity': None,
+                'label': label_norm,
+                'confidence': item.get('Probabilitas')
+            })
+
+        return jsonify({
+            'id': int(row.get('id')),
+            'filename': None,
+            'processed_by': row.get('processed_by'),
+            'created_at': row.get('analysis_date').isoformat() if row.get('analysis_date') else None,
+            'total_data': int(row.get('total_data') or 0),
+            'summary': {
+                'positif': int(row.get('pos_count') or 0),
+                'negatif': int(row.get('neg_count') or 0),
+                'netral': int(row.get('net_count') or 0)
+            },
+            'details': mapped_details,
+            'pagination': {
+                'page': page,
+                'per_page': per_page,
+                'total': total_details
+            }
+        })
+    finally:
+        connection.close()
+
+@app.route('/api/admin/analyses/<int:analysis_id>/export', methods=['GET'])
+@login_required
+@_require_admin
+def api_admin_analyses_export(analysis_id):
+    connection = get_db_connection()
+    if not connection:
+        return jsonify({'message': 'Database connection failed'}), 500
+
+    try:
+        cursor = connection.cursor(dictionary=True)
+        cursor.execute("SELECT id, analysis_date, processed_by, data_summary FROM sentiment_results WHERE id = %s", (analysis_id,))
+        row = cursor.fetchone()
+        cursor.close()
+
+        if not row:
+            return jsonify({'message': 'Not found'}), 404
+
+        records = []
+        try:
+            if row.get('data_summary'):
+                records = json.loads(row.get('data_summary'))
+        except Exception:
+            records = []
+
+        df = pd.DataFrame(records)
+        output = io.StringIO()
+        df.to_csv(output, index=False)
+        output.seek(0)
+
+        filename = f"analysis_{analysis_id}.csv"
+        mem = io.BytesIO(output.getvalue().encode('utf-8'))
+        mem.seek(0)
+        return send_file(mem, mimetype='text/csv', as_attachment=True, download_name=filename)
+    finally:
+        connection.close()
+
+@app.route('/api/admin/analyses/<int:analysis_id>', methods=['DELETE'])
+@login_required
+@_require_admin
+def api_admin_analyses_delete(analysis_id):
+    connection = get_db_connection()
+    if not connection:
+        return jsonify({'message': 'Database connection failed'}), 500
+
+    try:
+        cursor = connection.cursor()
+        cursor.execute("DELETE FROM sentiment_results WHERE id = %s", (analysis_id,))
+        connection.commit()
+        cursor.close()
+        return jsonify({'success': True})
+    finally:
+        connection.close()
+
+# --- Pemuatan Model (Dipanggil dari __main__) ---
+def load_resources():
+    global tokenizer, model, MODEL_LOADED, training_metrics
+    try:
+        print("   📦 Loading tokenizer...")
+        tokenizer = BertTokenizer.from_pretrained(MODEL_PATH)
+        print("   ✅ Tokenizer loaded")
+        
+        print("   🤖 Loading BERT model...")
+        # Optimasi loading model (tanpa parameter yang memerlukan accelerate)
+        model = BertForSequenceClassification.from_pretrained(
+            MODEL_PATH,
+            torch_dtype=torch.float32,  # Gunakan float32 untuk CPU
+            low_cpu_mem_usage=True      # Optimasi memori CPU
+        )
+        model.to(DEVICE)
+        model.eval()
+        MODEL_LOADED = True
+        print("   ✅ Model loaded successfully")
+        
+        print("   📊 Loading training metrics...")
+        training_metrics = joblib.load(f"{MODEL_PATH}/training_metrics.pkl")
+        print("   ✅ Training metrics loaded")
+        
+    except Exception as e:
+        print(f"🚨 ERROR: Gagal memuat sumber daya model. Pastikan model_training.py sudah dijalankan. Error: {e}")
+        MODEL_LOADED = False
+
+# --- Fungsi Prediksi ---
+def predict_sentiment_bert(text):
+    if not MODEL_LOADED or not text:
+        return 'Model Error', 0.0, [0, 0, 0] 
+    
+    encoded_input = tokenizer(text, return_tensors='pt', truncation=True, padding='max_length', max_length=128).to(DEVICE)
+    
+    with torch.no_grad():
+        output = model(**encoded_input)
+
+    scores = output.logits[0].cpu().numpy()
+    scores = softmax(scores)
+    prediction = np.argmax(scores)
+    
+    return LABEL_MAPPING.get(prediction, 'Tidak Diketahui'), scores[prediction], scores.tolist()
+
+# --- Fungsi WordCloud ---
+def create_wordcloud(text_data, sentiment_type):
+    """Membuat WordCloud untuk sentimen tertentu"""
+    if not text_data or text_data.strip() == "":
+        print(f"DEBUG: No text data for {sentiment_type}")
+        return None
+    
+    # Konfigurasi warna berdasarkan sentimen
+    if sentiment_type == 'Positif':
+        colormap = 'Greens'
+        background_color = 'white'
+    elif sentiment_type == 'Negatif':
+        colormap = 'Reds'
+        background_color = 'white'
+    else:  # Netral
+        colormap = 'Wistia'
+        background_color = 'white'
+    
+    try:
+        print(f"DEBUG: Creating wordcloud for {sentiment_type} with {len(text_data)} chars")
+        
+        wordcloud = WordCloud(
+            width=800,
+            height=400,
+            background_color=background_color,
+            colormap=colormap,
+            max_words=100,
+            contour_width=1,
+            contour_color='steelblue',
+            font_path=None,  # Akan menggunakan font default
+            prefer_horizontal=1.0,
+            scale=2.0,
+            stopwords=custom_stopwords  # Tambahkan stopwords kustom
+        ).generate(text_data)
+        
+        # Create PIL Image directly from WordCloud object
+        pil_image = wordcloud.to_image()
+        
+        # Add title using PIL
+        from PIL import ImageDraw, ImageFont
+        
+        # Create a new image with space for title
+        title_height = 60
+        img_width, img_height = pil_image.size
+        new_img = Image.new('RGB', (img_width, img_height + title_height), background_color)
+        new_img.paste(pil_image, (0, title_height))
+        
+        # Add title
+        draw = ImageDraw.Draw(new_img)
+        try:
+            font = ImageFont.truetype("arial.ttf", 24)
+        except:
+            font = ImageFont.load_default()
+        
+        title_text = f'WordCloud - Sentimen {sentiment_type}'
+        bbox = draw.textbbox((0, 0), title_text, font=font)
+        text_width = bbox[2] - bbox[0]
+        text_x = (img_width - text_width) // 2
+        text_y = 10
+        
+        draw.text((text_x, text_y), title_text, fill='black', font=font)
+        
+        print(f"DEBUG: Successfully created wordcloud image for {sentiment_type}")
+        return new_img
+        
+    except Exception as e:
+        print(f"Error creating wordcloud: {e}")
+        # Create simple fallback text image
+        try:
+            from PIL import ImageDraw, ImageFont
+            
+            # Create a simple image with text
+            img_width, img_height = 800, 400
+            fallback_img = Image.new('RGB', (img_width, img_height), 'white')
+            draw = ImageDraw.Draw(fallback_img)
+            
+            try:
+                font = ImageFont.truetype("arial.ttf", 20)
+            except:
+                font = ImageFont.load_default()
+            
+            text = f'WordCloud {sentiment_type}\n(Tidak dapat membuat dari data)'
+            bbox = draw.textbbox((0, 0), text, font=font)
+            text_width = bbox[2] - bbox[0]
+            text_height = bbox[3] - bbox[1]
+            
+            text_x = (img_width - text_width) // 2
+            text_y = (img_height - text_height) // 2
+            
+            draw.text((text_x, text_y), text, fill='gray', font=font)
+            
+            print(f"DEBUG: Created fallback wordcloud for {sentiment_type}")
+            return fallback_img
+        except Exception as e2:
+            print(f"Error creating fallback wordcloud: {e2}")
+            return None
+
+def create_pie_chart(sentiment_counts):
+    """Membuat Pie Chart untuk distribusi sentimen"""
+    try:
+        # Jika tidak ada data, gunakan data fallback
+        if not sentiment_counts or len(sentiment_counts) == 0:
+            sentiment_counts = {'Positif': 0, 'Negatif': 0, 'Netral': 0}
+            print("DEBUG: Using fallback data for pie chart")
+        
+        # Validasi: jika semua nilai adalah 0, return None untuk menghindari division by zero
+        total_count = sum(sentiment_counts.values())
+        if total_count == 0:
+            print("DEBUG: All sentiment counts are zero, skipping pie chart creation")
+            return None
+        
+        labels = list(sentiment_counts.keys())
+        values = list(sentiment_counts.values())
+        colors = ['#dc3545', '#28a745', '#ffc107']  # Merah, Hijau, Kuning
+        
+        # Urutkan: Negatif, Positif, Netral
+        color_map = {'Negatif': '#dc3545', 'Positif': '#28a745', 'Netral': '#ffc107'}
+        ordered_colors = [color_map.get(label, '#6c757d') for label in labels]
+        
+        fig = go.Figure(data=[go.Pie(
+            labels=labels,
+            values=values,
+            hole=0.3,
+            marker_colors=ordered_colors,
+            textinfo='label+percent+value',
+            textfont_size=12,
+            hovertemplate='<b>%{label}</b><br>Jumlah: %{value}<br>Persentase: %{percent}<extra></extra>'
+        )])
+        
+        fig.update_layout(
+            title={
+                'text': 'Distribusi Sentimen',
+                'x': 0.5,
+                'xanchor': 'center',
+                'font': {'size': 20, 'color': '#1f3a68'}
+            },
+            font=dict(family="Inter, sans-serif"),
+            showlegend=True,
+            legend=dict(
+                orientation="h",
+                yanchor="bottom",
+                y=1.02,
+                xanchor="right",
+                x=1
+            )
+        )
+        
+        # Convert ke JSON untuk ditampilkan di HTML
+        result = json.dumps(fig, cls=plotly.utils.PlotlyJSONEncoder)
+        print(f"DEBUG: Pie chart created successfully, length: {len(result)}")
+        return result
+    except Exception as e:
+        print(f"Error creating pie chart: {e}")
+        return None
+
+# ----------------------------------------
+# --- AUTHENTICATION ROUTES ---
+# ----------------------------------------
+
+@app.route('/')
+def index():
+    return render_template('login.html')
+
+@app.route('/login', methods=['GET', 'POST'])
+def login():
+    if current_user.is_authenticated:
+        return redirect(url_for('dashboard'))
+
+    error = None
+    if request.method == 'POST':
+        username = request.form['username']
+        password = request.form['password']
+        
+        # Use UserManager for authentication
+        user, auth_error = user_manager.authenticate_user(username, password)
+        
+        if user:
+            print(f"DEBUG: User {user.username} logged in, is_admin: {user.is_admin()}")
+            login_user(user)
+            
+            # Redirect based on role - Admin ke admin_dashboard, User ke user_dashboard
+            if user.is_admin():
+                print(f"DEBUG: Redirecting admin {user.username} to admin_dashboard")
+                return redirect(url_for('admin_dashboard'))
+            else:
+                print(f"DEBUG: Redirecting user {user.username} to user_dashboard")
+                return redirect(url_for('user_dashboard'))
+        else:
+            error = auth_error or 'Username atau Password salah.'
+    
+    db_name = MYSQL_CONFIG.get('database', 'N/A')
+    
+    # Handle success message from registration
+    success = None
+    if request.args.get('success'):
+        success = "Akun berhasil dibuat! Silakan masuk."
+    
+    return render_template('login.html', error=error, success=success, db_name=db_name)
+
+# ----------------------------------------
+# --- ROUTE BARU: REGISTER ---
+# ----------------------------------------
+@app.route('/register', methods=['GET', 'POST'])
+def register():
+    if current_user.is_authenticated:
+        return redirect(url_for('dashboard'))
+    
+    error = None
+    success = None
+    
+    if request.method == 'POST':
+        username = request.form['username']
+        password = request.form['password']
+        
+        if not username or not password:
+            error = "Username dan Password tidak boleh kosong."
+        elif len(password) < 6:
+            error = "Password minimal harus 6 karakter."
+        else:
+            try:
+                connection = get_db_connection()
+                if connection:
+                    cursor = connection.cursor(dictionary=True)
+                    cursor.execute("SELECT * FROM users WHERE username = %s", (username,))
+                    if cursor.fetchone():
+                        error = "Username ini sudah terdaftar. Gunakan nama lain."
+                    else:
+                        # Hash password
+                        hashed_password = generate_password_hash(password)
+                        
+                        cursor.execute("""
+                            INSERT INTO users (username, password_hash) 
+                            VALUES (%s, %s)
+                        """, (username, hashed_password))
+                        
+                        connection.commit()
+                        cursor.close()
+                        connection.close()
+                        success = "Akun berhasil dibuat! Silakan masuk."
+                        # Redirect ke halaman login setelah registrasi sukses
+                        return redirect(url_for('login', success=True)) 
+            
+            except Exception as e:
+                print(f"DATABASE ERROR during registration: {e}")
+                error = "Gagal terhubung ke database. Cek koneksi Anda."
+    
+    db_name = MYSQL_CONFIG.get('database', 'N/A')
+    # Perbaikan: Jika ada success message dari redirect, tampilkan.
+    if request.args.get('success'):
+         success = "Akun berhasil dibuat! Silakan masuk."
+         
+    return render_template('register.html', error=error, success=success, db_name=db_name)
+
+# ----------------------------------------
+# --- UTILITY AND DASHBOARD ROUTES ---
+# ----------------------------------------
+@app.route('/logout')
+@login_required
+def logout():
+    logout_user()
+    return redirect(url_for('login'))
+
+@app.route('/dashboard')
+@login_required
+def dashboard():
+    # Redirect based on user role
+    if current_user.is_admin():
+        return redirect(url_for('admin_dashboard'))
+    else:
+        return redirect(url_for('user_dashboard'))
+
+@login_required
+def user_dashboard():
+    """User dashboard - hanya bisa melihat hasil analisis"""
+    print(f"DEBUG: user_dashboard accessed by {current_user.username}, is_admin: {current_user.is_admin()}")
+    if current_user.is_admin():
+        print(f"DEBUG: Admin {current_user.username} redirected to admin_dashboard")
+        return render_template('admin_dashboard.html')
+    
+    # For regular users, show user dashboard template
+    # Get latest analysis results for dashboard
+    connection = get_db_connection()
+    if not connection:
+        return render_template('user_dashboard.html', error="Database connection failed")
+    
+    cursor = connection.cursor(dictionary=True)
+    cursor.execute("""
+        SELECT * FROM sentiment_results 
+        ORDER BY analysis_date DESC 
+        LIMIT 1
+    """)
+    last_result = cursor.fetchone()
+    
+    if not last_result:
+        cursor.close()
+        connection.close()
+        return render_template('user_dashboard.html', error="No analysis data available")
+    
+    # Parse data
+    try:
+        data_summary = json.loads(last_result['data_summary'])
+        df = pd.DataFrame(data_summary)
+    except:
+        cursor.close()
+        connection.close()
+        return render_template('user_dashboard.html', error="Error parsing analysis data")
+    
+    # Calculate sentiment counts
+    sentiment_counts = df['Sentimen Prediksi'].value_counts().to_dict()
+    
+    # Prepare result data
+    result = {
+        'pos_count': sentiment_counts.get('Positif', 0),
+        'neg_count': sentiment_counts.get('Negatif', 0),
+        'net_count': sentiment_counts.get('Netral', 0),
+        'total_data': len(df),
+        'results': df.head(10).to_dict('records'),  # Show first 10 items
+        'download_url': url_for('download_results')
+    }
+    
+    cursor.close()
+    connection.close()
+    
+    return render_template('user_dashboard.html', 
+                       result=result, 
+                       wordcloud_images={},  # Will be populated if needed
+                       error=None)
+
+@app.route('/user/results')
+@app.route('/user/results/<int:page>')
+@app.route('/user/results/<sentiment_type>/<int:page>')
+@login_required
+def user_results(sentiment_type=None, page=1):
+    """User results page with all data or filtered by sentiment"""
+    if current_user.is_admin(): 
+        return redirect(url_for('admin_dashboard', page=1, active_tab='Positif'))
+    
+    # Get latest analysis results
+    connection = get_db_connection()
+    if not connection:
+        return render_template('user_results.html', error="Database connection failed")
+    
+    cursor = connection.cursor(dictionary=True)
+    cursor.execute("""
+        SELECT * FROM sentiment_results 
+        ORDER BY analysis_date DESC 
+        LIMIT 1
+    """)
+    last_result = cursor.fetchone()
+    
+    if not last_result:
+        cursor.close()
+        connection.close()
+        return render_template('user_results.html', error="No analysis data available")
+    
+    # Parse data
+    try:
+        data_summary = json.loads(last_result['data_summary'])
+        df = pd.DataFrame(data_summary)
+    except:
+        cursor.close()
+        connection.close()
+        return render_template('user_results.html', error="Error parsing analysis data")
+    
+    
+    # Get latest analysis results
+    connection = get_db_connection()
+    if not connection:
+        return render_template('user_results.html', error="Database connection failed")
+    
+    cursor = connection.cursor(dictionary=True)
+    cursor.execute("""
+        SELECT * FROM sentiment_results 
+        ORDER BY analysis_date DESC 
+        LIMIT 1
+    """)
+    last_result = cursor.fetchone()
+    
+    if not last_result:
+        cursor.close()
+        connection.close()
+        return render_template('user_results.html', error="No analysis data available")
+    
+    # Parse data
+    try:
+        data_summary = json.loads(last_result['data_summary'])
+        df = pd.DataFrame(data_summary)
+    except:
+        cursor.close()
+        connection.close()
+        return render_template('user_results.html', error="Error parsing analysis data")
+    
+    # Filter by sentiment if specified
+    if sentiment_type and sentiment_type in ['Positif', 'Negatif', 'Netral']:
+        df_filtered = df[df['Sentimen Prediksi'] == sentiment_type]
+    else:
+        df_filtered = df
+    
+    # Pagination settings
+    per_page = 20
+    total_items = len(df_filtered)
+    total_pages = (total_items + per_page - 1) // per_page
+    
+    # Get paginated data
+    start_idx = (page - 1) * per_page
+    end_idx = start_idx + per_page
+    paginated_data = df_filtered.iloc[start_idx:end_idx]
+    
+    # Get text column
+    text_column = None
+    for col in df.columns:
+        if col.lower() in ['komentar', 'text', 'teks']:
+            text_column = col
+            break
+    
+    if not text_column:
+        text_column = df.columns[0]
+    
+    # Convert to records for template
+    results = paginated_data[[text_column, 'Sentimen Prediksi', 'Probabilitas']].to_dict('records')
+    
+    # Get sentiment counts for navigation
+    sentiment_counts = df['Sentimen Prediksi'].value_counts().to_dict()
+    
+    cursor.close()
+    connection.close()
+    
+    return render_template('user_results.html',
+                       results=results,
+                       sentiment_type=sentiment_type,
+                       current_page=page,
+                       total_pages=total_pages,
+                       total_items=total_items,
+                       per_page=per_page,
+                       sentiment_counts=sentiment_counts,
+                       text_column=text_column,
+                       analysis_date=last_result['analysis_date'])
+
+# --- ADMIN ROUTES ---
+
+@app.route('/admin/upload')
+@login_required
+# ... (rest of the code remains the same)
+def admin_upload():
+    if not current_user.is_admin():
+        return redirect(url_for('user_dashboard'))
+    
+
+@app.route('/admin/analyze', methods=['POST'])
+@login_required
+def analyze():
+    print(f"🔄 ANALYZE ROUTE CALLED - User: {current_user.username if current_user.is_authenticated else 'Anonymous'}")
+    print(f"📁 Request method: {request.method}")
+    print(f"📁 Files in request: {list(request.files.keys()) if 'file' in request.files else 'No files'}")
+    api_mode = request.path.startswith('/api/')
+    
+    global global_df_results
+    if not current_user.is_admin():
+        print("❌ ACCESS DENIED: User is not admin")
+        if api_mode:
+            return jsonify({'message': 'Forbidden'}), 403
+        return redirect(url_for('dashboard'))
+        
+    # Validasi model sebelum memulai
+    if not MODEL_LOADED:
+        print("❌ ERROR: Model not loaded!")
+        if api_mode:
+            return jsonify({'message': 'Model gagal dimuat. Cek log server untuk detail.'}), 500
+        return render_template('index.html', error="Model gagal dimuat. Cek log server untuk detail.")
+    
+    print(f"✅ Model validation passed - Device: {DEVICE}")
+
+    if 'file' not in request.files or request.files['file'].filename == '':
+        if api_mode:
+            return jsonify({'message': 'Pilih file sebelum mengunggah.'}), 400
+        return render_template('index.html', error="Pilih file sebelum mengunggah.")
+        
+    file = request.files['file']
+    
+    if file and file.filename.rsplit('.', 1)[1].lower() in ALLOWED_EXTENSIONS:
+        try:
+            analysis_start_time = time.time()
+            # Step 1: Read file dengan error handling
+            try:
+                print(f"📁 STEP 1/7: Reading file...")
+                start_time = time.time()
+                
+                session['analysis_progress'] = 0
+                session['analysis_status'] = 'Membaca file...'
+                session['analysis_detail'] = 'Memuat data dari file CSV/Excel'
+                
+                file_stream = file.stream.read()
+                file_size = len(file_stream)
+                print(f"   📊 File size: {file_size:,} bytes ({file_size/1024/1024:.2f} MB)")
+                
+                if file.filename.endswith('.csv'):
+                    df = pd.read_csv(io.StringIO(file_stream.decode("latin-1")), encoding='latin-1') 
+                    print(f"   📄 File type: CSV")
+                else: 
+                    df = pd.read_excel(io.BytesIO(file_stream))
+                    print(f"   📄 File type: Excel")
+
+                df.columns = [str(c).strip().lstrip('\ufeff') for c in df.columns]
+                
+                print(f"   📋 DataFrame shape: {df.shape}")
+                print(f"   ⏱️  File read time: {time.time() - start_time:.2f} seconds")
+                
+                session['analysis_progress'] = 5
+                session['analysis_detail'] = f'File berhasil dimuat: {df.shape[0]} baris data'
+                
+            except Exception as e:
+                print(f"❌ ERROR in Step 1 (File Reading): {e}")
+                import traceback
+                traceback.print_exc()
+                session['analysis_progress'] = 0
+                session['analysis_status'] = 'Error'
+                session['analysis_detail'] = f'Error membaca file: {str(e)}'
+                if api_mode:
+                    return jsonify({'message': f"Error membaca file: {str(e)}"}), 400
+                return render_template('index.html', error=f"Error membaca file: {e}")
+            
+            # Step 2: Validasi kolom
+            text_column = next((col for col in df.columns if col.lower() in ['komentar', 'text', 'teks']), None)
+
+            if not text_column:
+                if api_mode:
+                    return jsonify({'message': "Kolom 'komentar', 'text', atau 'teks' tidak ditemukan di file Anda."}), 400
+                return render_template('index.html', error="Kolom 'komentar', 'text', atau 'teks' tidak ditemukan di file Anda.")
+
+            print(f"📝 Found text column: {text_column}")
+            
+            # Step 3: Preprocessing dengan progress tracking
+            try:
+                print(f"🧹 STEP 2/7: Preprocessing data...")
+                start_time = time.time()
+                
+                session['analysis_progress'] = 10
+                session['analysis_status'] = 'Preprocessing data...'
+                session['analysis_detail'] = 'Membersihkan dan memformat teks'
+                
+                print(f"   📝 Text column: {text_column}")
+                print(f"   📊 Input shape: {df.shape}")
+                
+                df_original = df.copy() 
+                df = preprocess_dataframe(df, text_column)
+
+                if 'text_clean' not in df.columns:
+                    session['analysis_progress'] = 0
+                    session['analysis_status'] = 'Error'
+                    session['analysis_detail'] = f"Preprocessing tidak menghasilkan kolom 'text_clean'. Kolom tersedia: {list(df.columns)}"
+                    if api_mode:
+                        return jsonify({'message': session['analysis_detail']}), 400
+                    return render_template('index.html', error=session['analysis_detail'])
+                
+                preprocessing_time = time.time() - start_time
+                print(f"   ✅ Preprocessing completed in {preprocessing_time:.2f} seconds")
+                print(f"   📋 Output shape: {df.shape}")
+                print(f"   🧹 Clean texts: {df['text_clean'].notna().sum()}/{len(df)}")
+                
+                session['analysis_progress'] = 15
+                session['analysis_detail'] = f'Preprocessing selesai: {df.shape[0]} data siap dianalisis'
+                
+            except Exception as e:
+                print(f"❌ ERROR in Step 2 (Preprocessing): {e}")
+                import traceback
+                traceback.print_exc()
+                session['analysis_progress'] = 0
+                session['analysis_status'] = 'Error'
+                session['analysis_detail'] = f'Error preprocessing: {str(e)}'
+                if api_mode:
+                    return jsonify({'message': f"Error preprocessing: {str(e)}"}), 400
+                return render_template('index.html', error=f"Error preprocessing: {e}")
+            
+            # Step 4: Prediksi dengan batch processing yang dioptimasi
+            try:
+                print(f"🤖 STEP 3/7: Starting sentiment prediction...")
+                prediction_start_time = time.time()
+                
+                # Initialize progress tracking
+                session['analysis_progress'] = 20
+                session['analysis_status'] = 'Memulai analisis sentimen...'
+                session['analysis_detail'] = 'Memproses dengan model BERT'
+                
+                # Optimasi batch size untuk performa lebih baik
+                batch_size = 50  # Kurangi batch size untuk respons lebih cepat
+                results_list = []
+                total_records = len(df)
+                valid_texts_count = 0
+                invalid_texts_count = 0
+                
+                print(f"   📊 Total records to process: {total_records}")
+                print(f"   🔄 Batch size: {batch_size}")
+                print(f"   💻 Device: {DEVICE}")
+                
+                for i in range(0, total_records, batch_size):
+                    batch_df = df.iloc[i:i+batch_size]
+                    batch_start_time = time.time()
+                    
+                    # Update progress: Processing
+                    progress_percentage = 20 + (i / total_records) * 45  # 20-65% for processing
+                    session['analysis_progress'] = int(progress_percentage)
+                    session['analysis_status'] = 'Menganalisis sentimen...'
+                    session['analysis_detail'] = f'Memproses {min(i + batch_size, total_records)}/{total_records} data'
+                    
+                    # Optimasi: filter hanya teks yang tidak kosong
+                    valid_texts = batch_df['text_clean'].dropna()
+                    batch_results = []
+                    
+                    for text in valid_texts:
+                        if text and text.strip():
+                            result = predict_sentiment_bert(text)
+                            batch_results.append(result)
+                            valid_texts_count += 1
+                        else:
+                            batch_results.append(('Tidak Valid', 0.0, [0,0,0]))
+                            invalid_texts_count += 1
+                    
+                    # Tambahkan hasil untuk teks kosong
+                    while len(batch_results) < len(batch_df):
+                        batch_results.append(('Tidak Valid', 0.0, [0,0,0]))
+                        invalid_texts_count += 1
+                    
+                    results_list.extend(batch_results)
+                    
+                    # Progress feedback lebih frequent
+                    if i % (batch_size * 2) == 0:  # Setiap 100 records
+                        progress = min(i + batch_size, total_records)
+                        percentage = (progress / total_records) * 100
+                        batch_time = time.time() - batch_start_time
+                        elapsed_time = time.time() - prediction_start_time
+                        eta = (elapsed_time / progress) * (total_records - progress) if progress > 0 else 0
+                        
+                        print(f"   🔄 Progress: {progress:,}/{total_records:,} ({percentage:.1f}%)")
+                        print(f"      ⏱️  Batch time: {batch_time:.2f}s | Elapsed: {elapsed_time:.1f}s | ETA: {eta:.1f}s")
+                        print(f"      📝 Valid texts: {valid_texts_count} | Invalid: {invalid_texts_count}")
+                
+                prediction_time = time.time() - prediction_start_time
+                print(f"   ✅ Prediction completed in {prediction_time:.2f} seconds")
+                print(f"   📊 Total predictions: {len(results_list)}")
+                print(f"   📈 Valid/Invalid ratio: {valid_texts_count}/{invalid_texts_count}")
+                
+                # Hitung distribusi sentimen sementara
+                temp_sentiments = [res[0] for res in results_list]
+                from collections import Counter
+                sentiment_dist = Counter(temp_sentiments)
+                print(f"   🎯 Sentiment distribution: {dict(sentiment_dist)}")
+                
+            except Exception as e:
+                print(f"❌ ERROR in Step 3 (Prediction): {e}")
+                import traceback
+                traceback.print_exc()
+                session['analysis_progress'] = 0
+                session['analysis_status'] = 'Error'
+                session['analysis_detail'] = f'Error in prediction: {str(e)}'
+                if api_mode:
+                    return jsonify({'message': f"Error prediksi: {str(e)}"}), 500
+                return render_template('index.html', error=f"Error prediksi: {e}")
+            
+            # Step 5: Compile results
+            try:
+                print(f"📋 STEP 4/7: Compiling results...")
+                start_time = time.time()
+                
+                session['analysis_progress'] = 70
+                session['analysis_status'] = 'Mengkompilasi hasil...'
+                session['analysis_detail'] = 'Menggabungkan data analisis dengan data asli'
+                
+                print(f"   🔄 Merging {len(results_list)} predictions with original data...")
+                
+                df['Sentimen Prediksi'] = [res[0] for res in results_list]
+                df['Probabilitas'] = [res[1] for res in results_list]
+                
+                scores_df = pd.DataFrame([res[2] for res in results_list], columns=['Negatif_Score', 'Positif_Score', 'Netral_Score'])
+                
+                df = df.reset_index(drop=True)
+                df_original = df_original.reset_index(drop=True)
+                scores_df = scores_df.reset_index(drop=True)
+                df_output = pd.concat([df_original, df[['text_clean', 'Sentimen Prediksi', 'Probabilitas']], scores_df], axis=1)
+                
+                compile_time = time.time() - start_time
+                print(f"   ✅ Results compiled in {compile_time:.2f} seconds")
+                print(f"   📋 Final DataFrame shape: {df_output.shape}")
+                print(f"   📊 Columns: {list(df_output.columns)}")
+                
+                session['analysis_progress'] = 75
+                session['analysis_detail'] = f'Hasil dikompilasi: {df_output.shape[0]} data lengkap'
+                
+            except Exception as e:
+                print(f"❌ ERROR in Step 4 (Compilation): {e}")
+                import traceback
+                traceback.print_exc()
+                session['analysis_progress'] = 0
+                session['analysis_status'] = 'Error'
+                session['analysis_detail'] = f'Error kompilasi: {str(e)}'
+                if api_mode:
+                    return jsonify({'message': f"Error kompilasi hasil: {str(e)}"}), 500
+                return render_template('index.html', error=f"Error kompilasi hasil: {e}")
+            
+            # Step 6: Simpan ke database
+            try:
+                print(f"💾 STEP 5/7: Saving to database...")
+                start_time = time.time()
+                
+                session['analysis_progress'] = 80
+                session['analysis_status'] = 'Menyimpan hasil...'
+                session['analysis_detail'] = 'Menyimpan data ke database'
+                
+                # Normalisasi case
+                df_output['Sentimen Prediksi'] = df_output['Sentimen Prediksi'].str.title()
+                
+                sentiment_counts = df_output['Sentimen Prediksi'].value_counts()
+                pos_count = int(sentiment_counts.get('Positif', 0))
+                neg_count = int(sentiment_counts.get('Negatif', 0))
+                net_count = int(sentiment_counts.get('Netral', 0))
+                
+                print(f"   📊 Final sentiment counts: {sentiment_counts.to_dict()}")
+                print(f"   📈 Positif: {pos_count} | Negatif: {neg_count} | Netral: {net_count}")
+                
+                # Simpan semua data ke database (tanpa batasan)
+                print(f"   📝 Preparing data for database...")
+                summary_for_db = df_output[[text_column, 'Sentimen Prediksi', 'Probabilitas', 'text_clean']].to_dict('records')
+                
+                try:
+                    data_summary_json = json.dumps(summary_for_db)
+                    print(f"   💾 JSON size: {len(data_summary_json)} characters")
+                except Exception as json_error:
+                    print(f"   ❌ JSON serialization error: {json_error}")
+                    # Fallback: coba dengan sample data
+                    summary_for_db = summary_for_db[:100]  # Ambil 100 records pertama
+                    data_summary_json = json.dumps(summary_for_db)
+                    print(f"   ⚠️  Using sample data for JSON: {len(summary_for_db)} records")
+
+                connection = get_db_connection()
+                if connection:
+                    try:
+                        cursor = connection.cursor()
+                        total_data = len(df_output)
+                        
+                        print(f"   🔄 Executing database insert...")
+                        db_start_time = time.time()
+                        
+                        cursor.execute("""
+                            INSERT INTO sentiment_results 
+                            (total_data, pos_count, neg_count, net_count, processed_by, data_summary) 
+                            VALUES (%s, %s, %s, %s, %s, %s)
+                        """, (total_data, pos_count, neg_count, net_count, current_user.username, data_summary_json))
+                        
+                        connection.commit()
+                        cursor.close()
+                        connection.close()
+                        
+                        db_time = time.time() - db_start_time
+                        save_time = time.time() - start_time
+                        print(f"   ✅ Database insert completed in {db_time:.2f} seconds")
+                        print(f"   💾 Total save time: {save_time:.2f} seconds")
+                        
+                    except Exception as db_error:
+                        print(f"   ❌ Database operation error: {db_error}")
+                        if connection:
+                            connection.close()
+                        # Lanjutkan tanpa database
+                else:
+                    print(f"   ⚠️  WARNING: Could not connect to database - skipping save")
+                
+                session['analysis_progress'] = 90
+                session['analysis_detail'] = f'Data tersimpan: {len(df_output)} hasil analisis'
+                
+            except Exception as e:
+                print(f"❌ ERROR in Step 5 (Database): {e}")
+                import traceback
+                traceback.print_exc()
+                session['analysis_progress'] = 0
+                session['analysis_status'] = 'Error'
+                session['analysis_detail'] = f'Error database: {str(e)}'
+                # Lanjutkan meskipun database gagal
+            
+            # Step 7: Prepare display data
+            try:
+                print(f"🎨 STEP 6/7: Preparing display data...")
+                start_time = time.time()
+                
+                session['analysis_progress'] = 95
+                session['analysis_status'] = 'Menghasilkan visualisasi...'
+                session['analysis_detail'] = 'Membuat pie chart dan menyiapkan tampilan'
+                
+                total_data = len(df_output)
+                print(f"   📊 Total data for display: {total_data}")
+                
+                # Validasi dataframe sebelum processing
+                if df_output.empty:
+                    print(f"   ⚠️  WARNING: DataFrame is empty!")
+                
+                sentiment_counts = df_output['Sentimen Prediksi'].value_counts().reset_index()
+                sentiment_counts.columns = ['Sentimen', 'Jumlah']
+                results = df_output[[text_column, 'Sentimen Prediksi', 'Probabilitas', 'text_clean']].head(30).to_dict('records')
+                summary = sentiment_counts.to_dict('records')
+                
+                print(f"   📊 Preparing {len(results)} sample records for display")
+                print(f"   📈 Sentiment summary: {summary}")
+                
+                # Create pie chart data
+                try:
+                    sentiment_dict = df_output['Sentimen Prediksi'].value_counts().to_dict()
+                    valid_sentiments = {}
+                    for sentiment in ['Positif', 'Negatif', 'Netral']:
+                        if sentiment in sentiment_dict:
+                            valid_sentiments[sentiment] = sentiment_dict[sentiment]
+                    
+                    print(f"   📈 Creating pie chart with data: {valid_sentiments}")
+                    pie_chart_json = create_pie_chart(valid_sentiments)
+                    
+                    if pie_chart_json:
+                        print(f"   ✅ Pie chart created successfully")
+                    else:
+                        print(f"   ⚠️  Pie chart creation returned None")
+                        
+                except Exception as pie_error:
+                    print(f"   ❌ Pie chart error: {pie_error}")
+                    pie_chart_json = None
+                
+                # Simpan ke global
+                try:
+                    global_df_results = df_output.copy()
+                    print(f"   💾 Global results updated: {global_df_results.shape}")
+                except Exception as global_error:
+                    print(f"   ❌ Global results error: {global_error}")
+                
+                display_time = time.time() - start_time
+                print(f"   ✅ Display preparation completed in {display_time:.2f} seconds")
+                
+                # Final progress update
+                session['analysis_progress'] = 100
+                session['analysis_status'] = 'Analisis Selesai!'
+                session['analysis_detail'] = f'Berhasil menganalisis {total_data} data'
+                
+                # Calculate total analysis time
+                total_analysis_time = time.time() - analysis_start_time
+                print(f"\n🎉 ANALYSIS COMPLETED SUCCESSFULLY!")
+                print(f"⏱️  Total analysis time: {total_analysis_time:.2f} seconds")
+                print(f"📊 Total data processed: {total_data}")
+                print(f"📈 Sentiment distribution: {dict(sentiment_dict) if 'sentiment_dict' in locals() else 'N/A'}")
+                print(f"� Processed by: {current_user.username}")
+                print(f"📅 Completed at: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+                print("=" * 60)
+                
+                if api_mode:
+                    return jsonify({
+                        'success': True,
+                        'total_data': int(total_data),
+                        'pos_count': int(pos_count),
+                        'neg_count': int(neg_count),
+                        'net_count': int(net_count),
+                        'processed_by': current_user.username,
+                        'analysis_date': datetime.now().isoformat()
+                    })
+
+                return render_template('index.html', results=results, summary=summary, pie_chart_json=pie_chart_json,
+                                      total_data=total_data,
+                                      success=f"Analisis Selesai! {total_data} data berhasil diproses.", 
+                                      download_url=url_for('download_results'))
+            except Exception as e:
+                print(f"❌ ERROR in Step 6 (Display): {e}")
+                session['analysis_detail'] = f'Error display: {str(e)}'
+                if api_mode:
+                    return jsonify({'message': f"Error menyiapkan tampilan: {str(e)}"}), 500
+                return render_template('index.html', error=f"Error menyiapkan tampilan: {e}")
+
+        except Exception as e:
+            print(f"❌ CRITICAL ERROR in analysis: {e}")
+            import traceback
+            traceback.print_exc()
+            if api_mode:
+                return jsonify({'message': f"Terjadi kesalahan sistem: {str(e)}"}), 500
+            return render_template('index.html', error=f"Terjadi kesalahan sistem: {e}")
+
+@app.route('/api/refresh-data')
+@login_required
+def refresh_data():
+    """API endpoint untuk refresh data user dashboard"""
+    try:
+        # Get latest analysis results
+        connection = get_db_connection()
+        if connection:
+            cursor = connection.cursor(dictionary=True)
+            cursor.execute("""
+                SELECT analysis_date FROM sentiment_results 
+                ORDER BY analysis_date DESC 
+                LIMIT 1
+            """)
+            last_result = cursor.fetchone()
+            cursor.close()
+            connection.close()
+            
+            if last_result:
+                # Check if data is newer than 5 minutes
+                from datetime import datetime, timedelta
+                last_analysis = last_result['analysis_date']
+                if isinstance(last_analysis, str):
+                    last_analysis = datetime.fromisoformat(last_analysis.replace('Z', '+00:00'))
+                
+                if datetime.now() - last_analysis < timedelta(minutes=5):
+                    return jsonify({'updated': False, 'message': 'Data is up to date'})
+            
+            return jsonify({'updated': True, 'message': 'New data available'})
+        else:
+            return jsonify({'updated': False, 'message': 'Database connection failed'})
+            
+    except Exception as e:
+        print(f"Error refreshing data: {e}")
+        return jsonify({'updated': False, 'message': str(e)}), 500
+
+@app.route('/api/user/profile')
+@login_required
+def user_profile():
+    """API endpoint untuk user profile"""
+    try:
+        user_data = {
+            'id': current_user.id,
+            'username': current_user.username,
+            'is_admin': current_user.is_admin(),
+            'permissions': current_user.get_permissions()
+        }
+        
+        # Get user settings
+        settings = user_manager.get_user_settings(current_user.id)
+        if settings:
+            user_data['settings'] = settings
+        
+        return jsonify({'user': user_data})
+        
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/user/activity')
+@login_required
+def user_activity():
+    """API endpoint untuk user activity log"""
+    try:
+        page = request.args.get('page', 1, type=int)
+        per_page = request.args.get('per_page', 20, type=int)
+        
+        activities, total = user_manager.get_user_activities(current_user.id, page, per_page)
+        
+        return jsonify({
+            'activities': activities,
+            'pagination': {
+                'current_page': page,
+                'per_page': per_page,
+                'total': total,
+                'total_pages': (total + per_page - 1) // per_page
+            }
+        })
+        
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/admin/users')
+@login_required
+def admin_users():
+    """Admin users management page"""
+    if not current_user.is_admin():
+        return redirect(url_for('user_dashboard'))
+    
+    page = request.args.get('page', 1, type=int)
+    per_page = 20
+    
+    users, total = user_manager.get_all_users(page, per_page)
+    
+    return render_template('admin_users.html',
+                       users=users,
+                       total=total,
+                       current_page=page,
+                       per_page=per_page,
+                       total_pages=(total + per_page - 1) // per_page)
+
+@app.route('/admin/users/create', methods=['GET', 'POST'])
+@login_required
+def admin_create_user():
+    """Create new user (admin only)"""
+    if not current_user.is_admin():
+        return redirect(url_for('user_dashboard'))
+    
+    if request.method == 'POST':
+        username = request.form['username']
+        password = request.form['password']
+        email = request.form.get('email', '')
+        role = request.form.get('role', 'user')
+        
+        success, message = user_manager.create_user(username, password, email, role)
+        
+        if success:
+            return redirect(url_for('admin_users', success=message))
+        else:
+            return render_template('admin_create_user.html', error=message)
+    
+    return render_template('admin_create_user.html')
+
+@app.route('/admin/users/<int:user_id>/edit', methods=['GET', 'POST'])
+@login_required
+def admin_edit_user(user_id):
+    """Edit user (admin only)"""
+    if not current_user.is_admin():
+        return redirect(url_for('user_dashboard'))
+    
+    if request.method == 'POST':
+        # Update user
+        update_data = {}
+        if 'username' in request.form:
+            update_data['username'] = request.form['username']
+        if 'email' in request.form:
+            update_data['email'] = request.form['email']
+        if 'role' in request.form:
+            update_data['role'] = request.form['role']
+        if 'is_active' in request.form:
+            update_data['is_active'] = request.form['is_active'] == 'on'
+        
+        success, message = user_manager.update_user(user_id, **update_data)
+        
+        if success:
+            return redirect(url_for('admin_users', success=message))
+        else:
+            return render_template('admin_edit_user.html', error=message)
+    
+    # Get user data
+    user = user_manager.get_user_by_id(user_id)
+    if not user:
+        return redirect(url_for('admin_users', error='User not found'))
+    
+    return render_template('admin_edit_user.html', user=user)
+
+@app.route('/admin/users/<int:user_id>/delete', methods=['POST'])
+@login_required
+def admin_delete_user(user_id):
+    """Delete user (admin only)"""
+    if not current_user.is_admin():
+        return redirect(url_for('user_dashboard'))
+    
+    # Prevent self-deletion
+    if user_id == current_user.id:
+        return redirect(url_for('admin_users', error='Cannot delete your own account'))
+    
+    success, message = user_manager.delete_user(user_id)
+    
+    return redirect(url_for('admin_users', success=message) if success 
+                   else redirect(url_for('admin_users', error=message)))
+
+@app.route('/admin/settings')
+@login_required
+def admin_settings():
+    """Admin settings page"""
+    if not current_user.is_admin():
+        return redirect(url_for('user_dashboard'))
+    
+    return render_template('admin_settings.html')
+
+@app.route('/user/settings')
+@login_required
+def user_settings():
+    """User settings page"""
+    settings = user_manager.get_user_settings(current_user.id)
+    
+    return render_template('user_settings.html', settings=settings)
+
+@app.route('/user/settings/update', methods=['POST'])
+@login_required
+def update_user_settings():
+    """Update user settings"""
+    try:
+        update_data = {}
+        
+        if 'theme' in request.form:
+            update_data['theme'] = request.form['theme']
+        if 'language' in request.form:
+            update_data['language'] = request.form['language']
+        if 'email_notifications' in request.form:
+            update_data['email_notifications'] = request.form['email_notifications'] == 'on'
+        if 'results_per_page' in request.form:
+            update_data['results_per_page'] = int(request.form['results_per_page'])
+        if 'auto_save' in request.form:
+            update_data['auto_save'] = request.form['auto_save'] == 'on'
+        
+        success, message = user_manager.update_user_settings(current_user.id, **update_data)
+        
+        if success:
+            return redirect(url_for('user_settings', success=message))
+        else:
+            return redirect(url_for('user_settings', error=message))
+            
+    except Exception as e:
+        return redirect(url_for('user_settings', error=str(e)))
+
+@app.route('/api/analysis-progress')
+@login_required
+def get_analysis_progress():
+    """API endpoint untuk mendapatkan progress analisis real-time"""
+    try:
+        progress = session.get('analysis_progress', 0)
+        status = session.get('analysis_status', 'Starting...')
+        detail = session.get('analysis_detail', 'Initializing...')
+        
+        return jsonify({
+            'progress': progress,
+            'status': status,
+            'detail': detail
+        })
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+@app.route('/admin/dashboard')
+@app.route('/admin/dashboard/<int:page>')
+@app.route('/admin/dashboard/<int:page>/<active_tab>')
+@login_required
+def admin_dashboard(page=1, active_tab='Positif'):
+    if not current_user.is_admin():
+        return redirect(url_for('dashboard'))
+    
+    # Pagination settings
+    per_page = 10  # Jumlah data per halaman
+    
+    # Coba ambil data dari global_df_results dulu
+    df = global_df_results
+    
+    # Jika global kosong, coba ambil dari database
+    if df.empty:
+        try:
+            conn = get_db_connection()
+            cursor = conn.cursor(dictionary=True)
+            cursor.execute("SELECT data_summary FROM sentiment_results ORDER BY analysis_date DESC LIMIT 1")
+            result = cursor.fetchone()
+            cursor.close()
+            conn.close()
+            
+            if result and result['data_summary']:
+                import json
+                data_summary = json.loads(result['data_summary'])
+                # Konversi kembali ke DataFrame
+                df = pd.DataFrame(data_summary)
+        except Exception as e:
+            print(f"Error loading data from database: {e}")
+    
+    if df.empty:
+        return render_template('admin_dashboard.html', 
+                           total_data=0,
+                           sentiment_counts={},
+                           wordclouds={},
+                           pie_chart_json=None,
+                           active_tab=active_tab,
+                           error="Tidak ada data yang dianalisis. Silakan upload file terlebih dahulu.")
+    
+    # Buat Pie Chart untuk distribusi sentimen
+    sentiment_counts = df['Sentimen Prediksi'].value_counts().to_dict()
+    
+    # Filter hanya sentimen yang valid (Positif, Negatif, Netral)
+    valid_sentiments = {}
+    for sentiment in ['Positif', 'Negatif', 'Netral']:
+        if sentiment in sentiment_counts:
+            valid_sentiments[sentiment] = sentiment_counts[sentiment]
+    
+    print(f"DEBUG: original sentiment_counts = {sentiment_counts}")
+    print(f"DEBUG: filtered valid_sentiments = {valid_sentiments}")
+    
+    pie_chart_json = create_pie_chart(valid_sentiments)
+    print(f"DEBUG: pie_chart_json is None: {pie_chart_json is None}")
+    
+    # Buat WordCloud untuk setiap sentimen
+    wordclouds = {}
+    for sentiment in ['Positif', 'Negatif', 'Netral']:
+        print(f"DEBUG: Admin Dashboard - Processing {sentiment}")
+        sentiment_data = df[df['Sentimen Prediksi'] == sentiment]
+        print(f"DEBUG: Admin Dashboard - {sentiment} data shape: {sentiment_data.shape}")
+        
+        if not sentiment_data.empty:
+            # Cek apakah ada kolom text_clean, jika tidak gunakan kolom teks asli
+            if 'text_clean' in sentiment_data.columns:
+                text_for_wordcloud = ' '.join(sentiment_data['text_clean'].dropna().astype(str))
+                print(f"DEBUG: Admin Dashboard - Using text_clean for {sentiment}, length: {len(text_for_wordcloud)}")
+            else:
+                # Gunakan kolom teks asli untuk WordCloud
+                text_column = None
+                for col in df.columns:
+                    if col.lower() in ['komentar', 'text', 'teks']:
+                        text_column = col
+                        break
+                if text_column:
+                    text_for_wordcloud = ' '.join(sentiment_data[text_column].dropna().astype(str))
+                    print(f"DEBUG: Admin Dashboard - Using {text_column} for {sentiment}, length: {len(text_for_wordcloud)}")
+                else:
+                    text_for_wordcloud = "data tidak tersedia"
+                    print(f"DEBUG: Admin Dashboard - No text column found for {sentiment}")
+            
+            # Buat wordcloud dan convert ke base64 untuk HTML
+            print(f"DEBUG: Admin Dashboard - Creating wordcloud for {sentiment}")
+            wordcloud_image = create_wordcloud(text_for_wordcloud, sentiment)
+            if wordcloud_image:
+                # Convert PIL Image ke base64 string
+                img_buffer = io.BytesIO()
+                wordcloud_image.save(img_buffer, format='PNG')
+                img_buffer.seek(0)
+                image_base64 = base64.b64encode(img_buffer.getvalue()).decode()
+                wordclouds[sentiment] = f"data:image/png;base64,{image_base64}"
+                print(f"DEBUG: Admin Dashboard - Successfully created wordcloud for {sentiment}, base64 length: {len(image_base64)}")
+            else:
+                wordclouds[sentiment] = None
+                print(f"DEBUG: Admin Dashboard - Failed to create wordcloud for {sentiment}")
+        else:
+            wordclouds[sentiment] = None
+            print(f"DEBUG: Admin Dashboard - No data for sentiment: {sentiment}")
+    
+    print(f"DEBUG: Admin Dashboard - Final wordclouds keys: {list(wordclouds.keys())}")
+    for key, value in wordclouds.items():
+        print(f"DEBUG: Admin Dashboard - wordclouds[{key}] is None: {value is None}")
+        if value:
+            print(f"DEBUG: Admin Dashboard - wordclouds[{key}] length: {len(value)}")
+    
+    # Siapkan data ringkasan
+    summary_data = []
+    for sentiment, count in sentiment_counts.items():
+        summary_data.append({
+            'sentimen': sentiment,
+            'jumlah': count,
+            'persentase': f"{(count/len(df)*100):.1f}%"
+        })
+    
+    # Siapkan data detail dengan pagination untuk setiap sentimen
+    sentiment_details = {}
+    sentiment_pagination = {}
+    text_column = None
+    for col in df.columns:
+        if col.lower() in ['komentar', 'text', 'teks']:
+            text_column = col
+            break
+    
+    if not text_column:
+        text_column = df.columns[0]  # Fallback ke kolom pertama
+    
+    for sentiment in ['Positif', 'Negatif', 'Netral']:
+        sentiment_data = df[df['Sentimen Prediksi'] == sentiment]
+        data_list = []
+        
+        for idx, row in sentiment_data.iterrows():
+            text_bersih = row.get('text_clean', row[text_column])
+            
+            data_list.append({
+                'no': idx + 1,
+                'text_asli': row[text_column],
+                'text_bersih': text_bersih,
+                'sentimen': row['Sentimen Prediksi'],
+                'probabilitas': f"{row['Probabilitas']:.4f}",
+                'neg_score': f"{row.get('Negatif_Score', 0):.4f}",
+                'pos_score': f"{row.get('Positif_Score', 0):.4f}",
+                'net_score': f"{row.get('Netral_Score', 0):.4f}"
+            })
+        
+        # Pagination logic - gunakan page yang sesuai dengan active tab
+        current_page = page if sentiment == active_tab else 1
+        total_items = len(data_list)
+        total_pages = (total_items + per_page - 1) // per_page  # Ceiling division
+        start_idx = (current_page - 1) * per_page
+        end_idx = start_idx + per_page
+        paginated_data = data_list[start_idx:end_idx]
+        
+        sentiment_details[sentiment] = paginated_data
+        sentiment_pagination[sentiment] = {
+            'current_page': current_page,
+            'total_pages': total_pages,
+            'total_items': total_items,
+            'per_page': per_page,
+            'has_prev': current_page > 1,
+            'has_next': current_page < total_pages
+        }
+    
+    return render_template('admin_dashboard.html',
+                       total_data=len(df),
+                       summary_data=summary_data,
+                       pie_chart_json=pie_chart_json,
+                       wordclouds=wordclouds,
+                       sentiment_counts=sentiment_counts,
+                       sentiment_details=sentiment_details,
+                       sentiment_pagination=sentiment_pagination,
+                       active_tab=active_tab)
+
+@app.route('/admin/sentiment/<sentiment_type>')
+@app.route('/admin/sentiment/<sentiment_type>/<int:page>')
+@login_required
+def sentiment_detail(sentiment_type, page=1):
+    if not current_user.is_admin():
+        return redirect(url_for('dashboard'))
+    
+    # Coba ambil data dari global_df_results dulu
+    df = global_df_results
+    
+    # Jika global kosong, coba ambil dari database
+    if df.empty:
+        try:
+            conn = get_db_connection()
+            cursor = conn.cursor(dictionary=True)
+            cursor.execute("SELECT data_summary FROM sentiment_results ORDER BY analysis_date DESC LIMIT 1")
+            result = cursor.fetchone()
+            cursor.close()
+            conn.close()
+            
+            if result and result['data_summary']:
+                import json
+                data_summary = json.loads(result['data_summary'])
+                df = pd.DataFrame(data_summary)
+        except Exception as e:
+            print(f"Error loading data from database: {e}")
+    
+    if df.empty:
+        return render_template('sentiment_detail.html', 
+                           sentiment_type=sentiment_type,
+                           data=[],
+                           page=page,
+                           total_pages=0,
+                           has_prev=False,
+                           has_next=False,
+                           error="Tidak ada data yang dianalisis.")
+    
+    # Filter data berdasarkan sentimen
+    sentiment_data = df[df['Sentimen Prediksi'] == sentiment_type.title()]
+    
+    # Pagination
+    per_page = 20
+    total_items = len(sentiment_data)
+    total_pages = (total_items + per_page - 1) // per_page
+    start_idx = (page - 1) * per_page
+    end_idx = start_idx + per_page
+    paginated_data = sentiment_data.iloc[start_idx:end_idx]
+    
+    # Convert to list for template
+    data_list = []
+    text_column = None
+    for col in df.columns:
+        if col.lower() in ['komentar', 'text', 'teks']:
+            text_column = col
+            break
+    
+    if not text_column:
+        text_column = df.columns[0]
+    
+    for idx, (_, row) in enumerate(paginated_data.iterrows(), start=start_idx + 1):
+        text_bersih = row.get('text_clean', row[text_column])
+        
+        data_list.append({
+            'no': idx,
+            'text_asli': row[text_column],
+            'text_bersih': text_bersih,
+            'sentimen': row['Sentimen Prediksi'],
+            'probabilitas': f"{row['Probabilitas']:.4f}",
+            'neg_score': f"{row.get('Negatif_Score', 0):.4f}",
+            'pos_score': f"{row.get('Positif_Score', 0):.4f}",
+            'net_score': f"{row.get('Netral_Score', 0):.4f}"
+        })
+    
+    return render_template('sentiment_detail.html',
+                       sentiment_type=sentiment_type,
+                       data=data_list,
+                       page=page,
+                       total_pages=total_pages,
+                       has_prev=page > 1,
+                       has_next=page < total_pages)
+
+@app.route('/admin/metrics')
+@login_required
+def view_metrics():
+    if not current_user.is_admin():
+        return redirect(url_for('dashboard'))
+    
+
+    if not training_metrics:
+         return render_template('metrics.html', error="Metrik training tidak ditemukan.")
+    
+    try:
+        cm = np.array(training_metrics['confusion_matrix'])
+        
+        if cm.size == 0 or cm.shape[0] != NUM_LABELS:
+             raise ValueError("Confusion Matrix kosong atau ukurannya salah. Pelatihan mungkin gagal.")
+             
+        labels_cm = list(LABEL_MAPPING.values())
+        cm_df = pd.DataFrame(cm, index=labels_cm, columns=labels_cm)
+        training_metrics['cm_html'] = cm_df.to_html(classes='table table-bordered text-center')
+
+        report_df = pd.DataFrame(training_metrics['classification_report']).transpose().reset_index().round(4)
+        report_df.rename(columns={'index': 'Class'}, inplace=True)
+        training_metrics['report_html'] = report_df.to_html(classes='table table-bordered text-center', index=False)
+
+        return render_template('metrics.html', metrics=training_metrics)
+    except Exception as e:
+        print(f"ERROR METRICS: {e}")
+
+@app.route('/results')
+@login_required
+def results_dashboard():
+    # Route ini bisa diakses oleh admin dan user
+    last_result = None
+    connection = get_db_connection()
+    if connection:
+        cursor = connection.cursor(dictionary=True)
+        cursor.execute("SELECT * FROM sentiment_results ORDER BY analysis_date DESC LIMIT 1")
+        last_result = cursor.fetchone()
+        cursor.close()
+        connection.close()
+    
+    if last_result:
+        try:
+            last_result['data_summary'] = json.loads(last_result['data_summary'])
+        except json.JSONDecodeError:
+            print("Error parsing data_summary from database")
+            last_result['data_summary'] = []
+    
+    # Create pie chart dan wordcloud dari SEMUA DATA
+    pie_chart_json = None
+    wordcloud_images = {}
+    
+    if last_result and last_result['data_summary']:
+        try:
+            print(f"DEBUG: last_result exists: {last_result is not None}")
+            print(f"DEBUG: data_summary length: {len(last_result['data_summary']) if last_result['data_summary'] else 0}")
+            
+            # Convert ke DataFrame
+            df = pd.DataFrame(last_result['data_summary'])
+            print(f"DEBUG: DataFrame shape: {df.shape}")
+            print(f"DEBUG: DataFrame columns: {list(df.columns)}")
+            
+            if 'Sentimen Prediksi' in df.columns:
+                print(f"DEBUG: Sentimen Prediksi column found")
+                # Buat pie chart
+                sentiment_counts = df['Sentimen Prediksi'].value_counts().to_dict()
+                print(f"DEBUG: Raw sentiment_counts: {sentiment_counts}")
+                
+                valid_sentiments = {}
+                for sentiment in ['Positif', 'Negatif', 'Netral']:
+                    if sentiment in sentiment_counts:
+                        valid_sentiments[sentiment] = sentiment_counts[sentiment]
+                
+                print(f"DEBUG: Valid sentiments: {valid_sentiments}")
+                pie_chart_json = create_pie_chart(valid_sentiments)
+                
+                # Buat wordcloud dari SEMUA DATA
+                text_column = None
+                for col in df.columns:
+                    if col.lower() in ['komentar', 'text', 'teks']:
+                        text_column = col
+                        break
+                
+                print(f"DEBUG: Found text column: {text_column}")
+                
+                if not text_column:
+                    text_column = df.columns[0]
+                    print(f"DEBUG: Using first column as text: {text_column}")
+                
+                # Buat wordcloud untuk setiap sentimen
+                for sentiment in ['Positif', 'Negatif', 'Netral']:
+                    print(f"DEBUG: Processing sentiment: {sentiment}")
+                    sentiment_data = df[df['Sentimen Prediksi'] == sentiment]
+                    print(f"DEBUG: {sentiment} data shape: {sentiment_data.shape}")
+                    
+                    if not sentiment_data.empty:
+                        print(f"DEBUG: {sentiment} has data, processing...")
+                        if 'text_clean' in sentiment_data.columns:
+                            text_for_wordcloud = ' '.join(sentiment_data['text_clean'].dropna().astype(str))
+                            print(f"DEBUG: Using text_clean for {sentiment}, text length: {len(text_for_wordcloud)}")
+                        else:
+                            text_for_wordcloud = ' '.join(sentiment_data[text_column].dropna().astype(str))
+                            print(f"DEBUG: Using {text_column} for {sentiment}, text length: {len(text_for_wordcloud)}")
+                        
+                        # Buat wordcloud dan convert ke base64 untuk JavaScript
+                        print(f"DEBUG: Creating wordcloud for {sentiment}")
+                        wordcloud_image = create_wordcloud(text_for_wordcloud, sentiment)
+                        if wordcloud_image:
+                            # Convert PIL Image ke base64 string
+                            img_buffer = io.BytesIO()
+                            wordcloud_image.save(img_buffer, format='PNG')
+                            img_buffer.seek(0)
+                            image_base64 = base64.b64encode(img_buffer.getvalue()).decode()
+                            wordcloud_images[sentiment] = f"data:image/png;base64,{image_base64}"
+                            print(f"DEBUG: Successfully created wordcloud for {sentiment}, base64 length: {len(image_base64)}")
+                        else:
+                            wordcloud_images[sentiment] = None
+                            print(f"DEBUG: Failed to create wordcloud for {sentiment}")
+                    else:
+                        wordcloud_images[sentiment] = None
+                        print(f"DEBUG: No data for sentiment: {sentiment}")
+                
+                print(f"DEBUG: Final wordcloud_images keys: {list(wordcloud_images.keys())}")
+                print(f"DEBUG: Final wordcloud_images values: {wordcloud_images}")
+            else:
+                print("DEBUG: 'Sentimen Prediksi' column not found in DataFrame")
+            
+        except Exception as e:
+            print(f"Error creating pie chart/wordcloud: {e}")
+            import traceback
+            traceback.print_exc()
+    else:
+        print("DEBUG: No last_result or data_summary")
+    
+    # Pagination settings
+    per_page = 10  # Jumlah data per halaman
+    page = request.args.get('page', 1, type=int)
+    
+    # Siapkan data detail dengan pagination
+    data_list = []
+    
+    # Pastikan df terdefinisi
+    if last_result and last_result['data_summary']:
+        df = pd.DataFrame(last_result['data_summary'])
+    else:
+        df = pd.DataFrame()
+    
+    text_column = None
+    for col in df.columns:
+        if col.lower() in ['komentar', 'text', 'teks']:
+            text_column = col
+            break
+    
+    if not text_column:
+        text_column = df.columns[0] if len(df.columns) > 0 else 'text'  # Fallback ke kolom pertama
+    
+    for idx, row in df.iterrows():
+        text_bersih = row.get('text_clean', row[text_column])
+        
+        data_list.append({
+            'no': idx + 1,
+            'text_asli': row[text_column],
+            'text_bersih': text_bersih,
+            'sentimen': row['Sentimen Prediksi'],
+            'probabilitas': f"{row['Probabilitas']:.4f}",
+            'neg_score': f"{row.get('Negatif_Score', 0):.4f}",
+            'pos_score': f"{row.get('Positif_Score', 0):.4f}",
+            'net_score': f"{row.get('Netral_Score', 0):.4f}"
+        })
+    
+    total_items = len(data_list)
+    total_pages = (total_items + per_page - 1) // per_page  # Ceiling division
+    start_idx = (page - 1) * per_page
+    end_idx = start_idx + per_page
+    paginated_data = data_list[start_idx:end_idx]
+    
+    print(f"DEBUG: Pagination - total_items: {total_items}, page: {page}, total_pages: {total_pages}")
+    
+    return render_template('user_results.html', result=last_result, pie_chart_json=pie_chart_json, wordcloud_images=wordcloud_images, data=paginated_data, page=page, total_pages=total_pages, has_prev=page > 1, has_next=page < total_pages)
+
+@app.route('/wordcloud/<sentiment>')
+@login_required
+def get_wordcloud(sentiment):
+    """API endpoint untuk mendapatkan WordCloud image"""
+    try:
+        print(f"DEBUG: Requested sentiment: {sentiment}")
+        print(f"DEBUG: global_df_results shape: {global_df_results.shape}")
+        
+        # Ambil data dari global_df_results atau database
+        df = global_df_results.copy()
+        
+        if df.empty:
+            print("DEBUG: No data in global_df_results, trying database...")
+            # Coba ambil dari database
+            connection = get_db_connection()
+            if connection:
+                cursor = connection.cursor(dictionary=True)
+                cursor.execute("SELECT data_summary FROM sentiment_results ORDER BY analysis_date DESC LIMIT 1")
+                result = cursor.fetchone()
+                cursor.close()
+                connection.close()
+                
+                if result and result['data_summary']:
+                    import json
+                    data_summary = json.loads(result['data_summary'])
+                    df = pd.DataFrame(data_summary)
+                    print(f"DEBUG: Loaded {len(df)} rows from database")
+                else:
+                    print("DEBUG: No data in database")
+                    return "No data available", 404
+            else:
+                print("DEBUG: Cannot connect to database")
+                return "No data available", 404
+        
+        print(f"DEBUG: global_df_results columns: {list(df.columns)}")
+        
+        # Filter data berdasarkan sentimen
+        sentiment_data = df[df['Sentimen Prediksi'] == sentiment.title()]
+        print(f"DEBUG: Filtered {sentiment} data shape: {sentiment_data.shape}")
+        
+        if sentiment_data.empty:
+            print(f"DEBUG: No data for sentiment: {sentiment}, trying with original case")
+            # Coba dengan case yang berbeda
+            if sentiment.lower() == 'neutral':
+                sentiment_data = df[df['Sentimen Prediksi'] == 'Netral']
+            elif sentiment.lower() == 'positive':
+                sentiment_data = df[df['Sentimen Prediksi'] == 'Positif']
+            elif sentiment.lower() == 'negative':
+                sentiment_data = df[df['Sentimen Prediksi'] == 'Negatif']
+            
+            print(f"DEBUG: After case conversion, {sentiment} data shape: {sentiment_data.shape}")
+            
+            if sentiment_data.empty:
+                print(f"DEBUG: Still no data for sentiment: {sentiment}")
+                return "No data for this sentiment", 404
+        
+        # Cek apakah ada kolom text_clean
+        if 'text_clean' in sentiment_data.columns:
+            text_for_wordcloud = ' '.join(sentiment_data['text_clean'].dropna().astype(str))
+            print("DEBUG: Using text_clean column")
+        else:
+            # Gunakan kolom teks asli
+            text_column = None
+            for col in df.columns:
+                if col.lower() in ['komentar', 'text', 'teks']:
+                    text_column = col
+                    break
+            if text_column:
+                text_for_wordcloud = ' '.join(sentiment_data[text_column].dropna().astype(str))
+                print(f"DEBUG: Using {text_column} column")
+            else:
+                text_for_wordcloud = "data tidak tersedia"
+                print("DEBUG: No text column found")
+        
+        print(f"DEBUG: Text length for wordcloud: {len(text_for_wordcloud)}")
+        
+        # Buat WordCloud
+        wordcloud_image = create_wordcloud(text_for_wordcloud, sentiment)
+        
+        if wordcloud_image:
+            # Convert PIL Image to bytes
+            img_buffer = io.BytesIO()
+            wordcloud_image.save(img_buffer, format='PNG')
+            img_buffer.seek(0)
+            
+            print(f"DEBUG: Successfully generated wordcloud for {sentiment}")
+            return send_file(img_buffer, mimetype='image/png', as_attachment=False, download_name=f'wordcloud_{sentiment}.png')
+        else:
+            print(f"DEBUG: Failed to generate wordcloud for {sentiment}")
+            return "Failed to generate wordcloud", 500
+            
+    except Exception as e:
+        print(f"Error generating wordcloud for {sentiment}: {e}")
+        import traceback
+        traceback.print_exc()
+        return "Error generating wordcloud", 500
+
+@app.route('/download')
+@login_required
+def download_results():
+    # Coba ambil data dari global_df_results dulu
+    df = global_df_results
+    
+    # Jika global kosong, coba ambil dari database
+    if df.empty:
+        try:
+            conn = get_db_connection()
+            cursor = conn.cursor(dictionary=True)
+            cursor.execute("SELECT data_summary FROM sentiment_results ORDER BY analysis_date DESC LIMIT 1")
+            result = cursor.fetchone()
+            cursor.close()
+            conn.close()
+            
+            if result and result['data_summary']:
+                import json
+                data_summary = json.loads(result['data_summary'])
+                # Konversi kembali ke DataFrame
+                df = pd.DataFrame(data_summary)
+        except Exception as e:
+            print(f"Error loading data from database: {e}")
+    
+    if df.empty:
+        return redirect(url_for('admin_upload'))
+
+    output = io.BytesIO()
+    writer = pd.ExcelWriter(output, engine='xlsxwriter')
+    df.to_excel(writer, sheet_name='Hasil Analisis Sentimen', index=False)
+    writer.close()
+    output.seek(0)
+    
+    return send_file(output, mimetype='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+                     download_name="hasil_analisis_sentimen_lengkap.xlsx", as_attachment=True)
+
+if __name__ == '__main__':
+    print("=" * 60)
+    print("🚀 STARTING SENTIMENT ANALYSIS APPLICATION")
+    print(f"📅 Started at: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+    print(f"💻 Device: {DEVICE}")
+    print("=" * 60)
+    
+    # Validasi dependencies
+    try:
+        print("🔍 Checking dependencies...")
+        import torch
+        import transformers
+        import pandas as pd
+        import plotly
+        import mysql.connector
+        print("✅ All dependencies imported successfully")
+    except ImportError as e:
+        print(f"❌ Missing dependency: {e}")
+        print("Please install missing packages with: pip install torch transformers pandas plotly mysql-connector-python")
+        exit(1)
+    
+    # Load model dengan validasi
+    print("🤖 Loading BERT model...")
+    try:
+        load_resources()
+        if MODEL_LOADED:
+            print(f"✅ Model loaded successfully on {DEVICE}")
+            print(f"📊 Training metrics available: {training_metrics is not None}")
+    except Exception as e:
+        print(f"❌ Error loading model: {e}")
+    
+    # Buat user admin default
+    create_default_admin()
+    
+    # Test database connection
+    print("🗄️  Testing database connection...")
+    try:
+        conn = get_db_connection()
+        if conn:
+            cursor = conn.cursor()
+            cursor.execute("SELECT 1")
+            cursor.close()
+            conn.close()
+            print("✅ Database connection successful")
+        else:
+            print("⚠️  WARNING: Could not connect to database")
+    except Exception as e:
+        print(f"❌ Database connection failed: {e}")
+        print("Analysis will continue but data saving may fail")
+    
+    print("=" * 60)
+    print("🌐 Starting Flask server...")
+    print("📱 Access the application at: http://127.0.0.1:5000")
+    print("👤 Default login: admin/admin123")
+    print("=" * 60)
+    
+    app.run(debug=False, host='0.0.0.0', port=5000)
